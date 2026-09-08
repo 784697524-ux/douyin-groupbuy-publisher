@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="100%" role="img" aria-label="发布流程：初始化建表、读表取记录、素材校验、驱动发布、等待审核、回写验证六步">
+  <title>六步发布流程：初始化、读表、素材校验、驱动发布、等待审核、回写验证</title>
+  <defs>
+    <linearGradient id="wGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0089FF"/>
+      <stop offset="0.5" stop-color="#58A6FF"/>
+      <stop offset="1" stop-color="#FE2C55"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" rx="16" fill="#F6F8FA"/>
+  <text x="40" y="48" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="22" font-weight="700" fill="#1F2328">发布流程</text>
+  <text x="160" y="48" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="14" fill="#656D76">首次使用 --init 自动建表，之后一条命令跑完全程</text>
+
+  <!-- 六步横排卡片 -->
+  <g font-family="-apple-system, 'PingFang SC', sans-serif">
+    <!-- 步骤1 -->
+    <g>
+      <rect x="40" y="76" width="168" height="150" rx="12" fill="#FFFFFF" stroke="#D0D7DE"/>
+      <circle cx="66" cy="104" r="14" fill="#0089FF"/>
+      <text x="66" y="109" text-anchor="middle" font-size="14" font-weight="700" fill="#FFFFFF">1</text>
+      <text x="88" y="109" font-size="15" font-weight="700" fill="#1F2328">初始化</text>
+      <text x="58" y="140" font-size="13" fill="#57606A">首次运行自动在</text>
+      <text x="58" y="158" font-size="13" fill="#57606A">钉钉创建 Base 和</text>
+      <text x="58" y="176" font-size="13" fill="#57606A">11 字段流水线表</text>
+      <text x="58" y="200" font-size="12" fill="#0089FF">仅需一次</text>
+    </g>
+    <line x1="216" y1="151" x2="236" y2="151" stroke="#8C959F" stroke-width="2"/>
+    <polygon points="236,151 228,146 228,156" fill="#8C959F"/>
+    <!-- 步骤2 -->
+    <g>
+      <rect x="240" y="76" width="168" height="150" rx="12" fill="#FFFFFF" stroke="#D0D7DE"/>
+      <circle cx="266" cy="104" r="14" fill="#0089FF"/>
+      <text x="266" y="109" text-anchor="middle" font-size="14" font-weight="700" fill="#FFFFFF">2</text>
+      <text x="288" y="109" font-size="15" font-weight="700" fill="#1F2328">读表</text>
+      <text x="258" y="140" font-size="13" fill="#57606A">筛选「是否需要</text>
+      <text x="258" y="158" font-size="13" fill="#57606A">发布=是」且素材</text>
+      <text x="258" y="176" font-size="13" fill="#57606A">完整的下一条</text>
+      <text x="258" y="200" font-size="12" fill="#0089FF">缺素材自动跳过</text>
+    </g>
+    <line x1="416" y1="151" x2="436" y2="151" stroke="#8C959F" stroke-width="2"/>
+    <polygon points="436,151 428,146 428,156" fill="#8C959F"/>
+    <!-- 步骤3 -->
+    <g>
+      <rect x="440" y="76" width="168" height="150" rx="12" fill="#FFFFFF" stroke="#D0D7DE"/>
+      <circle cx="466" cy="104" r="14" fill="#58A6FF"/>
+      <text x="466" y="109" text-anchor="middle" font-size="14" font-weight="700" fill="#FFFFFF">3</text>
+      <text x="488" y="109" font-size="15" font-weight="700" fill="#1F2328">素材校验</text>
+      <text x="458" y="140" font-size="13" fill="#57606A">下载视频/封面并</text>
+      <text x="458" y="158" font-size="13" fill="#57606A">字节级校验，</text>
+      <text x="458" y="176" font-size="13" fill="#57606A">本地 CORS 供流</text>
+      <text x="458" y="200" font-size="12" fill="#0089FF">绕过安全 SDK 拦截</text>
+    </g>
+    <line x1="616" y1="151" x2="636" y2="151" stroke="#8C959F" stroke-width="2"/>
+    <polygon points="636,151 628,146 628,156" fill="#8C959F"/>
+    <!-- 步骤4 -->
+    <g>
+      <rect x="640" y="76" width="168" height="150" rx="12" fill="#FFFFFF" stroke="#D0D7DE"/>
+      <circle cx="666" cy="104" r="14" fill="#FE2C55"/>
+      <text x="666" y="109" text-anchor="middle" font-size="14" font-weight="700" fill="#FFFFFF">4</text>
+      <text x="688" y="109" font-size="15" font-weight="700" fill="#1F2328">驱动发布</text>
+      <text x="658" y="140" font-size="13" fill="#57606A">opencli 驱动已登录</text>
+      <text x="658" y="158" font-size="13" fill="#57606A">Chrome：上传/填表/</text>
+      <text x="658" y="176" font-size="13" fill="#57606A">选位置/AI 声明/核对</text>
+      <text x="658" y="200" font-size="12" fill="#FE2C55">发布前须人工确认</text>
+    </g>
+    <line x1="816" y1="151" x2="836" y2="151" stroke="#8C959F" stroke-width="2"/>
+    <polygon points="836,151 828,146 828,156" fill="#8C959F"/>
+    <!-- 步骤5 -->
+    <g>
+      <rect x="840" y="76" width="168" height="150" rx="12" fill="#FFFFFF" stroke="#D0D7DE"/>
+      <circle cx="866" cy="104" r="14" fill="#FE2C55"/>
+      <text x="866" y="109" text-anchor="middle" font-size="14" font-weight="700" fill="#FFFFFF">5</text>
+      <text x="888" y="109" font-size="15" font-weight="700" fill="#1F2328">等待审核</text>
+      <text x="858" y="140" font-size="13" fill="#57606A">每 30s 轮询作品</text>
+      <text x="858" y="158" font-size="13" fill="#57606A">状态，过审后经</text>
+      <text x="858" y="176" font-size="13" fill="#57606A">API 取视频链接</text>
+      <text x="858" y="200" font-size="12" fill="#FE2C55">未通过则停止报警</text>
+    </g>
+    <line x1="1016" y1="151" x2="1036" y2="151" stroke="#8C959F" stroke-width="2"/>
+    <polygon points="1036,151 1028,146 1028,156" fill="#8C959F"/>
+    <!-- 步骤6 -->
+    <g>
+      <rect x="1040" y="76" width="120" height="150" rx="12" fill="#FFFFFF" stroke="#D0D7DE"/>
+      <circle cx="1066" cy="104" r="14" fill="#2DA44E"/>
+      <text x="1066" y="109" text-anchor="middle" font-size="14" font-weight="700" fill="#FFFFFF">6</text>
+      <text x="1088" y="109" font-size="15" font-weight="700" fill="#1F2328">回写</text>
+      <text x="1058" y="140" font-size="13" fill="#57606A">已用/否/链接</text>
+      <text x="1058" y="158" font-size="13" fill="#57606A">三项一次写入</text>
+      <text x="1058" y="176" font-size="13" fill="#57606A">并回读验证</text>
+      <text x="1058" y="200" font-size="12" fill="#2DA44E">✓ 闭环完成</text>
+    </g>
+  </g>
+
+  <!-- 底部流程线 -->
+  <line x1="40" y1="262" x2="1160" y2="262" stroke="url(#wGrad)" stroke-width="4" stroke-linecap="round"/>
+  <text x="40" y="288" font-family="ui-monospace, Menlo, monospace" font-size="13" fill="#57606A">钉钉 AI 表 ──────────────── 抖音发布 ──────────────── 链接回到 AI 表</text>
+</svg>
