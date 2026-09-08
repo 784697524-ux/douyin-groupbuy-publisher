@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 460" width="100%" role="img" aria-label="抖音团购自动发布 CLI：钉钉 AI 表到抖音发布再到链接回填的自动化管道">
+  <title>抖音团购自动发布 CLI：钉钉 AI 表 → 抖音发布 → 链接回填</title>
+  <defs>
+    <linearGradient id="dyGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#25F4EE"/>
+      <stop offset="1" stop-color="#FE2C55"/>
+    </linearGradient>
+    <linearGradient id="pipeGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0089FF"/>
+      <stop offset="1" stop-color="#25F4EE"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="460" rx="16" fill="#0D1117"/>
+
+  <!-- 终端窗口点 -->
+  <circle cx="40" cy="38" r="6" fill="#FE2C55" opacity="0.9"/>
+  <circle cx="60" cy="38" r="6" fill="#F0B72F" opacity="0.9"/>
+  <circle cx="80" cy="38" r="6" fill="#2EA043" opacity="0.9"/>
+
+  <!-- 标题区 -->
+  <text x="40" y="112" font-family="-apple-system, 'PingFang SC', 'Segoe UI', 'Noto Sans SC', sans-serif" font-size="44" font-weight="800" fill="#FFFFFF">抖音团购 · 自动发布 CLI</text>
+  <text x="40" y="152" font-family="-apple-system, 'PingFang SC', 'Segoe UI', 'Noto Sans SC', sans-serif" font-size="19" fill="#8B949E">一条命令：钉钉 AI 表读取素材 → 驱动 Chrome 发布到抖音 → 审核过审后自动回填视频链接</text>
+
+  <!-- 终端命令行 -->
+  <rect x="40" y="180" width="560" height="52" rx="10" fill="#161B22" stroke="#30363D"/>
+  <text x="62" y="213" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" fill="#8B949E">$</text>
+  <text x="84" y="213" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" fill="#7EE787">python3 douyin_publish.py</text>
+  <rect x="470" y="196" width="9" height="20" fill="#7EE787">
+    <animate attributeName="opacity" values="1;0;1" dur="1.6s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- 管道：三节点 -->
+  <!-- 节点1 钉钉AI表 -->
+  <g>
+    <rect x="40" y="272" width="300" height="120" rx="12" fill="#161B22" stroke="#0089FF" stroke-width="1.5"/>
+    <rect x="40" y="272" width="300" height="34" rx="12" fill="#0089FF" opacity="0.15"/>
+    <text x="58" y="295" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="15" font-weight="700" fill="#58A6FF">钉钉 AI 表</text>
+    <rect x="58" y="318" width="264" height="14" rx="4" fill="#21262D"/>
+    <rect x="58" y="318" width="180" height="14" rx="4" fill="#0089FF" opacity="0.5"/>
+    <rect x="58" y="340" width="264" height="14" rx="4" fill="#21262D"/>
+    <rect x="58" y="340" width="220" height="14" rx="4" fill="#0089FF" opacity="0.35"/>
+    <rect x="58" y="362" width="264" height="14" rx="4" fill="#21262D"/>
+    <rect x="58" y="362" width="90" height="14" rx="4" fill="#2EA043" opacity="0.6"/>
+    <text x="200" y="373" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="11" fill="#8B949E"> 是否需要发布 = 是</text>
+  </g>
+  <!-- 箭头1 -->
+  <g>
+    <line x1="348" y1="332" x2="404" y2="332" stroke="url(#pipeGrad)" stroke-width="3"/>
+    <polygon points="404,332 392,325 392,339" fill="#25F4EE"/>
+  </g>
+  <!-- 节点2 CLI -->
+  <g>
+    <rect x="412" y="272" width="300" height="120" rx="12" fill="#161B22" stroke="url(#dyGrad)" stroke-width="1.5"/>
+    <rect x="412" y="272" width="300" height="34" rx="12" fill="#FE2C55" opacity="0.12"/>
+    <text x="430" y="295" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="15" font-weight="700" fill="#FE2C55">douyin_publish.py</text>
+    <text x="430" y="330" font-family="ui-monospace, Menlo, monospace" font-size="13" fill="#C9D1D9">✓ 视频注入  ✓ 封面上传</text>
+    <text x="430" y="352" font-family="ui-monospace, Menlo, monospace" font-size="13" fill="#C9D1D9">✓ 位置/带货模式  ✓ AI声明</text>
+    <text x="430" y="374" font-family="ui-monospace, Menlo, monospace" font-size="13" fill="#7EE787">✓ 发布前核对 → 点发布</text>
+  </g>
+  <!-- 箭头2 -->
+  <g>
+    <line x1="720" y1="332" x2="776" y2="332" stroke="url(#pipeGrad)" stroke-width="3"/>
+    <polygon points="776,332 764,325 764,339" fill="#25F4EE"/>
+  </g>
+  <!-- 节点3 抖音 -->
+  <g>
+    <rect x="784" y="272" width="376" height="120" rx="12" fill="#161B22" stroke="#FE2C55" stroke-width="1.5"/>
+    <rect x="784" y="272" width="376" height="34" rx="12" fill="#FE2C55" opacity="0.12"/>
+    <text x="802" y="295" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="15" font-weight="700" fill="#FE2C55">抖音创作者中心</text>
+    <text x="802" y="332" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="14" fill="#C9D1D9">等待平台审核（轮询，默认 ≤10 分钟）</text>
+    <text x="802" y="360" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="14" fill="#C9D1D9">过审 → 取 PC 链接回填 AI 表</text>
+    <rect x="802" y="374" width="340" height="1" fill="#30363D"/>
+    <text x="802" y="392" font-family="ui-monospace, Menlo, monospace" font-size="12" fill="#58A6FF">douyin.com/video/7683…1906 ✓ 已回填</text>
+  </g>
+
+  <!-- 底部徽标条 -->
+  <g font-family="-apple-system, 'PingFang SC', sans-serif" font-size="13">
+    <rect x="40" y="416" width="120" height="26" rx="13" fill="#21262D"/>
+    <text x="100" y="433" text-anchor="middle" fill="#8B949E">Python 3</text>
+    <rect x="172" y="416" width="120" height="26" rx="13" fill="#21262D"/>
+    <text x="232" y="433" text-anchor="middle" fill="#8B949E">钉钉 dws</text>
+    <rect x="304" y="416" width="130" height="26" rx="13" fill="#21262D"/>
+    <text x="369" y="433" text-anchor="middle" fill="#8B949E">opencli 驱动</text>
+    <rect x="446" y="416" width="170" height="26" rx="13" fill="#21262D"/>
+    <text x="531" y="433" text-anchor="middle" fill="#8B949E">真实发布实战验证</text>
+  </g>
+</svg>
