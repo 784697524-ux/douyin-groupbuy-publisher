@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime="${SOCIAL_AUTO_UPLOAD_HOME:-$HOME/.openclaw/workspace/social-auto-upload}"
+exec "$runtime/.venv/bin/sau" "$@"

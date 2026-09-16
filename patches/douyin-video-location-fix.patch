@@ -1,0 +1,170 @@
+diff --git a/uploader/douyin_uploader/location_picker.py b/uploader/douyin_uploader/location_picker.py
+--- a/uploader/douyin_uploader/location_picker.py
++++ b/uploader/douyin_uploader/location_picker.py
+@@ -70,7 +70,21 @@ def _location_option_score(option_text: str, location: str, query: str) -> int:
+         score += 120
+     if query_text and query_text in text:
+         score += 100
+-    for token in ("合肥", "滨湖", "慈溪", "城西", "银泰", "银泰城", "百货"):
++    for token in (
++        "杭州",
++        "拱墅",
++        "中大",
++        "合肥",
++        "滨湖",
++        "慈溪",
++        "城西",
++        "蚌埠",
++        "西湖",
++        "武林",
++        "银泰",
++        "银泰城",
++        "百货",
++    ):
+         if token in location and token in option_text:
+             score += 25
+     if "商场内有多家门店" in option_text:
+@@ -121,27 +135,49 @@ async def _type_query(page: Page, location_input, query: str) -> None:
+ 
+ 
+ async def _select_add_tag_value(page: Page, row_label: str, value: str, select_index: int) -> bool:
+-    select = page.locator(
+-        f'xpath=(//*[normalize-space(.)="{row_label}"]/following::*[contains(@class, "semi-select")])[{select_index}]'
++    selects = page.locator(
++        f'xpath=//*[normalize-space(.)="{row_label}"]/following::*[contains(concat(" ", normalize-space(@class), " "), " semi-select ")]'
+     )
+-    if not await select.count():
++    visible_selects = []
++    for i in range(await selects.count()):
++        candidate = selects.nth(i)
++        if await candidate.is_visible():
++            visible_selects.append(candidate)
++    if len(visible_selects) < select_index:
+         return False
++    select = visible_selects[select_index - 1]
+     try:
+         current = (await select.inner_text(timeout=2000)).strip()
+         if value in current:
+             await page.keyboard.press("Escape")
+             return True
+         await select.click(force=True, timeout=5000)
+-        await page.wait_for_timeout(300)
+-        option = page.locator(
+-            f'xpath=(//*[contains(@class, "semi-portal") or contains(@class, "semi-popover") or contains(@class, "semi-dropdown")]//*[normalize-space(.)="{value}" or contains(normalize-space(.), "{value}")])[1]'
+-        )
+-        await option.wait_for(state="visible", timeout=5000)
+-        await option.click(force=True, timeout=5000)
++        await page.wait_for_timeout(700)
++        option_locators = [
++            page.locator('[role="option"]').filter(has_text=value),
++            page.locator(".semi-select-option").filter(has_text=value),
++            page.locator(
++                f'xpath=//*[normalize-space(.)="{value}" and ancestor::*[@role="option" or contains(@class, "semi-select-option")]]'
++            ),
++        ]
++        clicked = False
++        for option in option_locators:
++            if await _click_first_visible(option, timeout=3000):
++                clicked = True
++                break
++        if not clicked:
++            return False
+         await page.wait_for_timeout(500)
+         await page.keyboard.press("Escape")
+-        await page.wait_for_timeout(200)
+-        return True
++        selected = (await select.inner_text(timeout=2000)).strip()
++        if value not in selected and value == "位置":
++            await select.click(force=True, timeout=5000)
++            await page.wait_for_timeout(300)
++            await page.keyboard.press("Home")
++            await page.keyboard.press("Enter")
++            await page.wait_for_timeout(500)
++            selected = (await select.inner_text(timeout=2000)).strip()
++        return value in selected
+     except Exception:
+         return False
+ 
+@@ -221,9 +257,20 @@ async def add_douyin_groupbuy_location(
+         if fallback_input:
+             await fallback_input.click(force=True, timeout=5000)
+             await page.wait_for_timeout(500)
++            trigger_clicked = True
+         else:
+-            await _screenshot(page, screenshot_dir, "douyin_location_input_not_visible.png")
+-            raise
++            text_trigger = await _first_visible(
++                page.locator(
++                    'xpath=//*[normalize-space(.)="输入地理位置" or contains(normalize-space(.), "输入相关位置") or contains(normalize-space(.), "输入城市+位置名称搜索")]'
++                ),
++                timeout=3000,
++            )
++            if not text_trigger:
++                await _screenshot(page, screenshot_dir, "douyin_location_input_not_visible.png")
++                raise
++            await text_trigger.click(force=True, timeout=5000)
++            await page.wait_for_timeout(500)
++            trigger_clicked = True
+ 
+     if trigger_clicked:
+         domestic_tabs = [
+@@ -235,3 +282,59 @@ async def add_douyin_groupbuy_location(
+         try:
+             clicked = False
+             for domestic_tab in domestic_tabs:
++                if await _click_first_visible(domestic_tab, timeout=3000):
++                    clicked = True
++                    break
++            if not clicked:
++                raise RuntimeError("domestic tab not found")
++            await page.wait_for_timeout(500)
++        except Exception:
++            await _screenshot(page, screenshot_dir, "douyin_location_domestic_tab_missing.png")
++            raise RuntimeError("domestic tab not found")
++
++    location_inputs = [
++        page.locator(
++            'xpath=(//*[normalize-space(.)="添加标签"]/following::input[contains(@placeholder, "输入城市+位置名称搜索") or contains(@placeholder, "输入相关位置") or contains(@placeholder, "输入地理位置")])[1]'
++        ),
++        page.locator('input[placeholder*="输入城市+位置名称搜索"]'),
++        page.locator('input[placeholder*="输入相关位置"]'),
++        page.locator(AUTOMA_LOCATION_INPUT),
++    ]
++    location_input = None
++    for candidate in location_inputs:
++        location_input = await _first_visible(candidate, timeout=3000)
++        if location_input:
++            break
++    if not location_input:
++        await _log(log, "未定位到位置输入框，尝试向当前聚焦输入框键盘输入")
++
++    queries = _location_queries(location)
++    selected_text = ""
++    for query in queries:
++        try:
++            await _type_query(page, location_input, query)
++            await page.wait_for_timeout(2500)
++        except Exception:
++            await _screenshot(page, screenshot_dir, "douyin_location_type_failed.png")
++            raise
++        selected_text = await _select_best_location_option(page, location, query)
++        if selected_text:
++            break
++    if not selected_text:
++        await _screenshot(page, screenshot_dir, "douyin_location_options_not_ready.png")
++        raise RuntimeError("location options did not appear after typing")
++
++    await page.wait_for_timeout(1000)
++
++    selected = page.locator(
++        'xpath=(//*[normalize-space(.)="添加标签"]/following::*[contains(normalize-space(.), "银泰") or contains(normalize-space(.), "慈溪")])[1]'
++    ).first
++    try:
++        selected_text = (await selected.inner_text(timeout=3000)).strip()
++    except Exception:
++        selected_text = ""
++    if _location_option_score(selected_text, location, queries[0]) < 70:
++        await _screenshot(page, screenshot_dir, "douyin_location_not_selected.png")
++        raise RuntimeError("location was not selected")
++
++    await _log(log, f"地理位置已选择: {selected_text}")

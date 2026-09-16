@@ -1,0 +1,124 @@
+diff --git a/sau_cli.py b/sau_cli.py
+--- a/sau_cli.py
++++ b/sau_cli.py
+@@ -340,10 +340,9 @@ async def upload_youtube_video(request: YouTubeVideoUploadRequest) -> Path:
+ 
+ async def upload_video(request: DouyinVideoUploadRequest) -> Path:
+     account_file = resolve_account_file("douyin", request.account_name)
+-    is_ready = await douyin_setup(str(account_file), handle=False)
+-    if not is_ready:
++    if not account_file.is_file():
+         raise RuntimeError(
+-            f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
++            f"Douyin cookie is missing: {account_file}. Run `sau douyin login --account {request.account_name}` first."
+         )
+ 
+     app = DouYinVideo(
+@@ -372,10 +371,9 @@ async def upload_video(request: DouyinVideoUploadRequest) -> Path:
+ 
+ async def upload_note(request: DouyinNoteUploadRequest) -> Path:
+     account_file = resolve_account_file("douyin", request.account_name)
+-    is_ready = await douyin_setup(str(account_file), handle=False)
+-    if not is_ready:
++    if not account_file.is_file():
+         raise RuntimeError(
+-            f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
++            f"Douyin cookie is missing: {account_file}. Run `sau douyin login --account {request.account_name}` first."
+         )
+ 
+     app = DouYinNote(
+diff --git a/uploader/douyin_uploader/main.py b/uploader/douyin_uploader/main.py
+--- a/uploader/douyin_uploader/main.py
++++ b/uploader/douyin_uploader/main.py
+@@ -87,6 +87,18 @@ async def douyin_setup(account_file, handle=False, return_detail=False, qrcode_c
+     return result if return_detail else True
+ 
+ 
++async def ensure_douyin_upload_page(page: Page) -> None:
++    await page.wait_for_timeout(2500)
++    has_login = (
++        await page.get_by_text("手机号登录").count()
++        or await page.get_by_text("扫码登录").count()
++    )
++    if "creator-micro/content/upload" not in page.url or has_login:
++        raise RuntimeError(
++            "Douyin cookie is expired. Run `sau douyin login --account <account>` first."
++        )
++
++
+ async def _extract_douyin_qrcode_src(page: Page) -> str:
+     # 等 SPA 加载完成（不只等"扫码登录"文字，否则抖音慢加载时 30s 就超时）。
+     # 给 domcontentloaded 后足够时间让客户端 JS 注入登录卡。
+@@ -914,6 +926,7 @@ class DouYinVideo(DouYinBaseUploader):
+ 
+         page = await context.new_page()
+         await page.goto("https://creator.douyin.com/creator-micro/content/upload", wait_until="domcontentloaded", timeout=90000)
++        await ensure_douyin_upload_page(page)
+         douyin_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
+         douyin_logger.info(_msg("🧭", "小人正在赶往上传主页"))
+         await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload", timeout=90000)
+@@ -1273,6 +1286,7 @@ class DouYinNote(DouYinBaseUploader):
+         try:
+             page = await context.new_page()
+             await page.goto("https://creator.douyin.com/creator-micro/content/upload", wait_until="domcontentloaded", timeout=90000)
++            await ensure_douyin_upload_page(page)
+             douyin_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
+             await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload", timeout=90000)
+ 
+diff --git a/tests/test_sau_browser_cli.py b/tests/test_sau_browser_cli.py
+--- a/tests/test_sau_browser_cli.py
++++ b/tests/test_sau_browser_cli.py
+@@ -412,5 +412,53 @@ class BrowserCliDispatchTests(unittest.TestCase):
+         self.assertEqual(len(request.image_files), 2)
+ 
+ 
++class DouyinSingleBrowserPublishTests(unittest.TestCase):
++    def test_upload_video_skips_separate_cookie_browser(self):
++        with tempfile.TemporaryDirectory() as tmp_dir:
++            account_file = Path(tmp_dir) / "creator.json"
++            account_file.write_text("{}", encoding="utf-8")
++            request = sau_cli.DouyinVideoUploadRequest(
++                account_name="creator",
++                video_file=Path("demo.mp4"),
++                title="视频标题",
++                description="视频简介",
++                tags=[],
++                publish_date=0,
++                location="杭州中大银泰百货",
++            )
++            preflight = AsyncMock()
++            with patch("sau_cli.resolve_account_file", return_value=account_file), patch(
++                "sau_cli.douyin_setup", new=preflight
++            ), patch("sau_cli.DouYinVideo") as video_cls:
++                video_cls.return_value.douyin_upload_video = AsyncMock()
++                asyncio.run(sau_cli.upload_video(request))
++
++            preflight.assert_not_awaited()
++            video_cls.return_value.douyin_upload_video.assert_awaited_once()
++
++    def test_upload_note_skips_separate_cookie_browser(self):
++        with tempfile.TemporaryDirectory() as tmp_dir:
++            account_file = Path(tmp_dir) / "creator.json"
++            account_file.write_text("{}", encoding="utf-8")
++            request = sau_cli.DouyinNoteUploadRequest(
++                account_name="creator",
++                image_files=[Path("1.png")],
++                title="图文标题",
++                note="图文正文",
++                tags=[],
++                publish_date=0,
++                location="杭州中大银泰百货",
++            )
++            preflight = AsyncMock()
++            with patch("sau_cli.resolve_account_file", return_value=account_file), patch(
++                "sau_cli.douyin_setup", new=preflight
++            ), patch("sau_cli.DouYinNote") as note_cls:
++                note_cls.return_value.douyin_upload_note = AsyncMock()
++                asyncio.run(sau_cli.upload_note(request))
++
++            preflight.assert_not_awaited()
++            note_cls.return_value.douyin_upload_note.assert_awaited_once()
++
++
+ if __name__ == "__main__":
+     unittest.main()

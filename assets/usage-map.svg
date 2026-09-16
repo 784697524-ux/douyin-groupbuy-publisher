@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-label="抖音团购选品图文发布自动化命令和产物关系">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity=".12"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="720" rx="28" fill="#f8fafc"/>
+  <text x="60" y="70" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="32" font-weight="700" fill="#111827">怎么使用：三条命令 + 一次生图</text>
+  <text x="60" y="108" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="18" fill="#64748b">CLI 负责选品、生成工作包和发布；Codex 原生生图负责把 prompt 变成海报图片。</text>
+
+  <g transform="translate(60 152)" filter="url(#shadow)">
+    <rect width="330" height="430" rx="18" fill="#ffffff"/>
+  </g>
+  <text x="92" y="202" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="22" font-weight="700" fill="#111827">1. select 选品</text>
+  <rect x="92" y="228" width="266" height="128" rx="14" fill="#0f172a"/>
+  <text x="112" y="260" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">python scripts/...</text>
+  <text x="112" y="286" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">select --date 昨天</text>
+  <text x="112" y="312" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">--metric 商品成交券数</text>
+  <text x="112" y="338" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">--output selection.json</text>
+  <text x="92" y="396" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16" fill="#475569">产物：后台选品 JSON</text>
+  <text x="92" y="426" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16" fill="#475569">包含：商品名、商品详情、内部选品依据</text>
+
+  <g transform="translate(435 152)" filter="url(#shadow)">
+    <rect width="330" height="430" rx="18" fill="#ffffff"/>
+  </g>
+  <text x="467" y="202" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="22" font-weight="700" fill="#111827">2. brief + imagegen</text>
+  <rect x="467" y="228" width="266" height="128" rx="14" fill="#0f172a"/>
+  <text x="487" y="260" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">python scripts/...</text>
+  <text x="487" y="286" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">brief --selection ...</text>
+  <text x="487" y="312" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">--output-dir groupbuy_work</text>
+  <text x="487" y="338" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">imagegen prompts → images/</text>
+  <text x="467" y="396" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16" fill="#475569">产物：公开推广工作包</text>
+  <text x="467" y="426" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16" fill="#475569">title.txt / caption.txt / image_prompts.md</text>
+  <text x="467" y="456" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16" fill="#475569">images/ 放 3-5 张海报</text>
+
+  <g transform="translate(810 152)" filter="url(#shadow)">
+    <rect width="330" height="430" rx="18" fill="#ffffff"/>
+  </g>
+  <text x="842" y="202" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="22" font-weight="700" fill="#111827">3. publish 发布</text>
+  <rect x="842" y="228" width="266" height="128" rx="14" fill="#0f172a"/>
+  <text x="862" y="260" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">python scripts/...</text>
+  <text x="862" y="286" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">publish / publish-video</text>
+  <text x="862" y="312" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">--location 合肥滨湖银泰百货</text>
+  <text x="862" y="338" font-family="Menlo,Consolas,monospace" font-size="14" fill="#e5e7eb">--bgm auto --headed</text>
+  <text x="842" y="396" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16" fill="#475569">动作：上传图文或视频、挂国内 POI</text>
+  <text x="842" y="426" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16" fill="#475569">成功：进入作品管理页或平台成功状态</text>
+
+  <rect x="78" y="624" width="1044" height="54" rx="18" fill="#fff0f4"/>
+  <text x="104" y="658" font-family="Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="18" fill="#be123c">注意：短信验证码、验证码、POI 候选错误都不算发布完成。</text>
+</svg>

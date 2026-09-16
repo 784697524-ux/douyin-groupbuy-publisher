@@ -1,0 +1,1771 @@
+diff --git a/sau_cli.py b/sau_cli.py
+index e5c8727..1e29986 100644
+--- a/sau_cli.py
++++ b/sau_cli.py
+@@ -2,6 +2,7 @@ from __future__ import annotations
+ 
+ import argparse
+ import asyncio
++import json
+ import sys
+ from dataclasses import dataclass
+ from datetime import datetime
+@@ -18,6 +19,10 @@ from uploader.douyin_uploader.main import (
+     cookie_auth as douyin_cookie_auth,
+     douyin_setup,
+ )
++from uploader.douyin_uploader.product_selector import (
++    DEFAULT_GROUP_ID,
++    select_groupbuy_products,
++)
+ from uploader.ks_uploader.main import (
+     KUAISHOU_PUBLISH_STRATEGY_IMMEDIATE,
+     KUAISHOU_PUBLISH_STRATEGY_SCHEDULED,
+@@ -63,6 +68,7 @@ class DouyinVideoUploadRequest:
+     thumbnail_portrait_file: Path | None = None
+     product_link: str = ""
+     product_title: str = ""
++    location: str = ""
+     publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
+     debug: bool = True
+     headless: bool = True
+@@ -76,6 +82,7 @@ class DouyinNoteUploadRequest:
+     note: str
+     tags: list[str]
+     publish_date: datetime | int
++    location: str = ""
+     publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
+     debug: bool = True
+     headless: bool = True
+@@ -353,6 +360,7 @@ async def upload_video(request: DouyinVideoUploadRequest) -> Path:
+         ) if request.thumbnail_portrait_file or request.thumbnail_file else None,
+         productLink=request.product_link,
+         productTitle=request.product_title,
++        location=request.location,
+         publish_strategy=request.publish_strategy,
+         debug=request.debug,
+         headless=request.headless,
+@@ -380,11 +388,41 @@ async def upload_note(request: DouyinNoteUploadRequest) -> Path:
+         debug=request.debug,
+         headless=request.headless,
+         bgm=request.bgm,
++        location=request.location,
+     )
+     await app.douyin_upload_note()
+     return account_file
+ 
+ 
++async def select_douyin_groupbuy_products(
++    account_name: str,
++    groupid: str,
++    date_filter: str,
++    metric: str,
++    limit: int,
++    headless: bool,
++    debug: bool,
++    cdp_url: str = "",
++) -> dict:
++    account_file = resolve_account_file("douyin", account_name)
++    if not cdp_url:
++        is_ready = await douyin_setup(str(account_file), handle=False)
++        if not is_ready:
++            raise RuntimeError(
++                f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {account_name}` first."
++            )
++    return await select_groupbuy_products(
++        account_file=str(account_file),
++        groupid=groupid,
++        date_filter=date_filter,
++        metric=metric,
++        limit=limit,
++        headless=headless,
++        debug=debug,
++        cdp_url=cdp_url or None,
++    )
++
++
+ async def upload_kuaishou_video(request: KuaishouVideoUploadRequest) -> Path:
+     account_file = resolve_account_file("kuaishou", request.account_name)
+     is_ready = await ks_setup(str(account_file), handle=False)
+@@ -597,6 +635,7 @@ def build_parser() -> argparse.ArgumentParser:
+     upload_video_parser.add_argument("--thumbnail-portrait", type=existing_file_path, help="Optional 3:4 portrait thumbnail path")
+     upload_video_parser.add_argument("--product-link", default="", help="Optional product link")
+     upload_video_parser.add_argument("--product-title", default="", help="Optional product title")
++    upload_video_parser.add_argument("--location", default="", help="Optional Douyin location/POI keyword")
+     add_runtime_flags(upload_video_parser)
+ 
+     upload_note_parser = douyin_actions.add_parser("upload-note", help="Upload one note to Douyin")
+@@ -607,9 +646,23 @@ def build_parser() -> argparse.ArgumentParser:
+     upload_note_parser.add_argument("--notef", default="", help="Read note content from file (txt/md)")
+     upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+     upload_note_parser.add_argument("--bgm", default="", help="BGM music name to search and select")
++    upload_note_parser.add_argument("--location", default="", help="Optional Douyin location/POI keyword")
+     upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+     add_runtime_flags(upload_note_parser)
+ 
++    select_groupbuy_parser = douyin_actions.add_parser(
++        "select-groupbuy-products",
++        help="Select top group-buy products from Shengyijing ranking and verify details in Douyin Laike",
++    )
++    select_groupbuy_parser.add_argument("--account", required=True, help="Douyin user-defined account_name")
++    select_groupbuy_parser.add_argument("--groupid", default=DEFAULT_GROUP_ID, help="Douyin Laike groupid")
++    select_groupbuy_parser.add_argument("--date", default="昨天", help='Ranking date filter, default "昨天"')
++    select_groupbuy_parser.add_argument("--metric", default="商品成交券数", help='Ranking metric, default "商品成交券数"')
++    select_groupbuy_parser.add_argument("--limit", type=int, default=3, help="Number of ranked products to fetch")
++    select_groupbuy_parser.add_argument("--output", help="Write selection JSON to this file; stdout if omitted")
++    select_groupbuy_parser.add_argument("--cdp-url", default="", help="Optional Chrome DevTools URL for using an already logged-in Chrome session")
++    add_runtime_flags(select_groupbuy_parser)
++
+     kuaishou_parser = platform_parsers.add_parser("kuaishou", help="Kuaishou operations")
+     kuaishou_actions = kuaishou_parser.add_subparsers(dest="action", required=True)
+ 
+@@ -743,6 +796,27 @@ async def dispatch(args: argparse.Namespace) -> int:
+             print("valid" if is_valid else "invalid")
+             return 0 if is_valid else 1
+ 
++        if args.action == "select-groupbuy-products":
++            result = await select_douyin_groupbuy_products(
++                account_name=args.account,
++                groupid=args.groupid,
++                date_filter=args.date,
++                metric=args.metric,
++                limit=args.limit,
++                headless=args.headless,
++                debug=args.debug,
++                cdp_url=args.cdp_url,
++            )
++            rendered = json.dumps(result, ensure_ascii=False, indent=2)
++            if args.output:
++                output = Path(args.output).expanduser()
++                output.parent.mkdir(parents=True, exist_ok=True)
++                output.write_text(rendered + "\n", encoding="utf-8")
++                print(f"Douyin group-buy selection saved: {output}")
++            else:
++                print(rendered)
++            return 0
++
+         publish_strategy = DOUYIN_PUBLISH_STRATEGY_SCHEDULED if args.schedule else DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
+ 
+         if args.action == "upload-video":
+@@ -758,6 +832,7 @@ async def dispatch(args: argparse.Namespace) -> int:
+                 thumbnail_portrait_file=args.thumbnail_portrait,
+                 product_link=args.product_link,
+                 product_title=args.product_title,
++                location=args.location,
+                 publish_strategy=publish_strategy,
+                 debug=args.debug,
+                 headless=args.headless,
+@@ -783,6 +858,7 @@ async def dispatch(args: argparse.Namespace) -> int:
+                 note=note_content,
+                 tags=parse_tags(args.tags),
+                 publish_date=args.schedule or 0,
++                location=args.location,
+                 publish_strategy=publish_strategy,
+                 debug=args.debug,
+                 headless=args.headless,
+diff --git a/tests/test_sau_browser_cli.py b/tests/test_sau_browser_cli.py
+index c006b29..4ec38a4 100644
+--- a/tests/test_sau_browser_cli.py
++++ b/tests/test_sau_browser_cli.py
+@@ -38,6 +38,75 @@ class BrowserCliParserTests(unittest.TestCase):
+ 
+         self.assertEqual(args.desc, "视频简介")
+ 
++    def test_douyin_upload_video_accepts_location(self):
++        with tempfile.TemporaryDirectory() as tmp_dir:
++            video_path = Path(tmp_dir) / "demo.mp4"
++            video_path.write_bytes(b"video")
++
++            parser = sau_cli.build_parser()
++            args = parser.parse_args(
++                [
++                    "douyin",
++                    "upload-video",
++                    "--account",
++                    "creator",
++                    "--file",
++                    str(video_path),
++                    "--title",
++                    "标题",
++                    "--location",
++                    "合肥滨湖银泰",
++                ]
++            )
++
++        self.assertEqual(args.location, "合肥滨湖银泰")
++
++    def test_douyin_upload_note_accepts_location(self):
++        with tempfile.TemporaryDirectory() as tmp_dir:
++            image_path = Path(tmp_dir) / "1.png"
++            image_path.write_bytes(b"image")
++
++            parser = sau_cli.build_parser()
++            args = parser.parse_args(
++                [
++                    "douyin",
++                    "upload-note",
++                    "--account",
++                    "creator",
++                    "--images",
++                    str(image_path),
++                    "--title",
++                    "图文标题",
++                    "--note",
++                    "图文正文",
++                    "--location",
++                    "慈溪城西银泰百货",
++                ]
++            )
++
++        self.assertEqual(args.location, "慈溪城西银泰百货")
++
++    def test_douyin_select_groupbuy_products_defaults_to_coupon_count(self):
++        parser = sau_cli.build_parser()
++        args = parser.parse_args(
++            [
++                "douyin",
++                "select-groupbuy-products",
++                "--account",
++                "creator",
++                "--cdp-url",
++                "http://127.0.0.1:9222",
++                "--headed",
++            ]
++        )
++
++        self.assertEqual(args.action, "select-groupbuy-products")
++        self.assertEqual(args.date, "昨天")
++        self.assertEqual(args.metric, "商品成交券数")
++        self.assertEqual(args.cdp_url, "http://127.0.0.1:9222")
++        self.assertEqual(args.limit, 3)
++        self.assertFalse(args.headless)
++
+     def test_douyin_upload_video_accepts_dual_thumbnail_aspects(self):
+         with tempfile.TemporaryDirectory() as tmp_dir:
+             video_path = Path(tmp_dir) / "demo.mp4"
+@@ -183,10 +252,13 @@ class BrowserCliDispatchTests(unittest.TestCase):
+             images=[Path("1.png")],
+             title="图文标题",
+             note="图文正文",
++            notef="",
+             tags="测试,图文",
+             schedule=0,
++            location="慈溪城西银泰百货",
+             debug=False,
+             headless=True,
++            bgm="",
+         )
+         with patch("sau_cli.upload_note", new=AsyncMock()) as mock_upload:
+             asyncio.run(sau_cli.dispatch(args))
+@@ -194,6 +266,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
+         request = mock_upload.await_args.args[0]
+         self.assertEqual(request.title, "图文标题")
+         self.assertEqual(request.note, "图文正文")
++        self.assertEqual(request.location, "慈溪城西银泰百货")
+ 
+     def test_dispatch_douyin_upload_video_uses_dual_thumbnail_request_fields(self):
+         args = Namespace(
+@@ -210,6 +283,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
+             thumbnail_portrait=Path("portrait.png"),
+             product_link="",
+             product_title="",
++            location="合肥滨湖银泰",
+             debug=False,
+             headless=True,
+         )
+@@ -219,6 +293,30 @@ class BrowserCliDispatchTests(unittest.TestCase):
+         request = mock_upload.await_args.args[0]
+         self.assertEqual(request.thumbnail_landscape_file, Path("landscape.png"))
+         self.assertEqual(request.thumbnail_portrait_file, Path("portrait.png"))
++        self.assertEqual(request.location, "合肥滨湖银泰")
++
++    def test_dispatch_douyin_select_groupbuy_products_writes_output(self):
++        with tempfile.TemporaryDirectory() as tmp_dir:
++            output = Path(tmp_dir) / "selection.json"
++            args = Namespace(
++                platform="douyin",
++                action="select-groupbuy-products",
++                account="creator",
++                groupid="1748531528342532",
++                date="昨天",
++                metric="商品成交券数",
++                limit=3,
++                output=str(output),
++                cdp_url="",
++                debug=False,
++                headless=False,
++            )
++            result = {"products": [{"name": "测试券", "product_id": "1234567890123"}]}
++            with patch("sau_cli.select_douyin_groupbuy_products", new=AsyncMock(return_value=result)):
++                code = asyncio.run(sau_cli.dispatch(args))
++
++            self.assertEqual(code, 0)
++            self.assertIn("测试券", output.read_text(encoding="utf-8"))
+ 
+     def test_dispatch_tencent_upload_video_uses_dual_thumbnail_request_fields(self):
+         args = Namespace(
+diff --git a/uploader/douyin_uploader/main.py b/uploader/douyin_uploader/main.py
+index 772086b..711d3f2 100644
+--- a/uploader/douyin_uploader/main.py
++++ b/uploader/douyin_uploader/main.py
+@@ -4,13 +4,14 @@ from datetime import datetime
+ import asyncio
+ import inspect
+ import os
++import re
+ from pathlib import Path
+ 
+ from patchright.async_api import Page
+ from patchright.async_api import Playwright
+ from patchright.async_api import async_playwright
+ 
+-from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
++from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+ from uploader.base_video import BaseVideoUploader
+ from utils.base_social_media import set_init_script
+ from utils.login_qrcode import build_login_qrcode_path
+@@ -19,6 +20,8 @@ from utils.login_qrcode import print_terminal_qrcode
+ from utils.login_qrcode import remove_qrcode_file
+ from utils.login_qrcode import save_data_url_image
+ from utils.log import douyin_logger
++from uploader.douyin_uploader.location_picker import add_douyin_groupbuy_location
++from uploader.douyin_uploader.music_picker import select_first_music_from_automa
+ 
+ DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
+ DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+@@ -172,7 +175,9 @@ async def _is_douyin_login_completed(page: Page) -> bool:
+ 
+ async def _wait_for_douyin_login(page: Page, account_file: str, qrcode_info: dict, qrcode_callback=None, poll_interval: int = 3, max_checks: int = 100) -> dict:
+     qrcode_path = Path(qrcode_info["image_path"]) if qrcode_info.get("image_path") else None
+-    for _ in range(max_checks):
++    original_url = page.url
++    saw_2fa = False
++    for i in range(max_checks):
+         if await _is_douyin_login_completed(page):
+             douyin_logger.info(_msg("🥳", f"扫码成功，已经跳转到登录后页面: {page.url}"))
+             return _build_login_result(True, "success", "抖音扫码登录成功", account_file, qrcode_info, page.url)
+@@ -303,9 +308,12 @@ class DouYinBaseUploader(BaseVideoUploader):
+         await asyncio.sleep(1)
+ 
+     async def fill_title_and_description(self, page: Page, title: str, description: str, tags: list[str] | None = None):
+-        # 2026-06 抖音发布页 DOM：标题=input[placeholder*=填写作品标题]，描述=div.zone-container[contenteditable]
+-        # version_2(post/video) 发布页要等视频上传完才渲染表单（实测约 40s），故等待超时给到 120s
+-        title_input = page.locator('input[placeholder*="填写作品标题"]').first
++        # 图文/视频发布页标题占位文案会变，优先匹配标题类 placeholder，再退回可见 input
++        title_input = page.locator(
++            'input[placeholder*="作品标题"], input[placeholder*="填写标题"], input[placeholder*="添加标题"], input[placeholder*="标题"]'
++        ).first
++        if not await title_input.count():
++            title_input = page.locator("input").first
+         await title_input.wait_for(state="visible", timeout=120000)
+         await title_input.fill(title[:30])
+ 
+@@ -315,20 +323,283 @@ class DouYinBaseUploader(BaseVideoUploader):
+         await page.keyboard.press("Control+KeyA")
+         await page.keyboard.press("Delete")
+ 
++        desc_text = (description or "").strip()
++        if desc_text:
++            await page.keyboard.type(desc_text)
++
+         for tag in tags or []:
+             await page.keyboard.type(" #" + tag)
+             await page.keyboard.press("Space")
+         await page.keyboard.press("Escape")  # 收起话题下拉，避免浮层拦截后续点击
+ 
+     async def set_location(self, page: Page, location: str = ""):
++        await add_douyin_groupbuy_location(
++            page,
++            location,
++            Path(BASE_DIR) / "logs",
++            log=lambda message: douyin_logger.info(_msg("📍", message)),
++        )
++        return
+         if not location:
+             return
+-        await page.locator('div.semi-select span:has-text("输入地理位置")').click()
++        location_query = "合肥滨湖银泰百货" if location == "合肥滨湖银泰" else location
++        douyin_logger.info(_msg("📍", f"小人正在设置国内地理位置: {location_query}"))
++        location_variants = [location_query]
++        for variant in [
++            location_query.replace("银泰百货", "银泰城"),
++            location_query.replace("百货", ""),
++            location_query.replace("百货", "城"),
++            location_query.replace("银泰百货", "银泰"),
++            location_query.replace("慈溪", "").replace("百货", "城"),
++            location_query.replace("慈溪", ""),
++        ]:
++            variant = variant.strip()
++            if variant and variant not in location_variants:
++                location_variants.append(variant)
++
++        await page.evaluate(
++            "() => document.querySelectorAll('.shepherd-element,.shepherd-modal-overlay-container').forEach(e => e.remove())"
++        )
++        try:
++            await page.get_by_text("我知道了", exact=True).click(timeout=1000)
++        except Exception:
++            pass
++        await page.keyboard.press("Escape")
++
++        add_tag_label = page.get_by_text("添加标签", exact=True).first
++        await add_tag_label.scroll_into_view_if_needed(timeout=10000)
++
++        async def choose_add_tag_select(index: int, option_text: str):
++            select = page.locator(
++                f'xpath=//*[normalize-space(.)="添加标签"]/following::div[contains(concat(" ", normalize-space(@class), " "), " semi-select ")][{index}]'
++            ).first
++            await select.wait_for(state="visible", timeout=10000)
++            select_text = (await select.inner_text(timeout=2000)).strip()
++            if option_text in select_text:
++                return
++            await select.click(force=True, timeout=5000)
++            await page.wait_for_timeout(300)
++            option_locators = [
++                page.locator(
++                    f'xpath=(//*[contains(@class, "semi-portal") or contains(@class, "semi-popover") or contains(@class, "semi-dropdown")]//*[normalize-space(.)="{option_text}" or contains(normalize-space(.), "{option_text}")])[1]'
++                ),
++                page.locator(f'[role="option"]:has-text("{option_text}")').first,
++                page.locator(f'.semi-select-option:has-text("{option_text}")').first,
++            ]
++            try:
++                clicked = False
++                for option_locator in option_locators:
++                    if not await option_locator.count():
++                        continue
++                    await option_locator.first.click(force=True, timeout=5000)
++                    clicked = True
++                    break
++                if not clicked:
++                    raise RuntimeError(f"tag option not found: {option_text}")
++            except Exception:
++                select_debug_path = Path(BASE_DIR) / "logs" / f"douyin_location_select_{option_text}.png"
++                await page.screenshot(path=str(select_debug_path), full_page=True)
++                douyin_logger.error(_msg("📍", f"没点到「{option_text}」选项，截图已保存: {select_debug_path}"))
++                raise
++            await page.wait_for_timeout(500)
++
++        async def switch_to_domestic_if_present():
++            for _ in range(10):
++                domestic_tabs = [
++                    page.locator('xpath=//*[normalize-space(.)="国内"]'),
++                    page.locator('xpath=//*[contains(normalize-space(.), "国内")]'),
++                    page.locator('xpath=//*[contains(@class, "tab") and contains(normalize-space(.), "国内")]'),
++                    page.get_by_text("国内", exact=True),
++                ]
++                for domestic_tab in domestic_tabs:
++                    try:
++                        if not await domestic_tab.count():
++                            continue
++                        await domestic_tab.last.wait_for(state="visible", timeout=1000)
++                        await domestic_tab.last.click(force=True, timeout=3000)
++                        await page.wait_for_timeout(600)
++                        return True
++                    except Exception:
++                        continue
++                await page.wait_for_timeout(500)
++            return False
++
++        async def choose_location_option():
++            await page.wait_for_timeout(2000)
++            first_option_locators = [
++                page.locator(
++                    'xpath=(//*[contains(@class, "semi-portal") or contains(@class, "semi-popover") or contains(@class, "semi-dropdown")]//*[contains(@class, "semi-select-option") or @role="option"])[1]'
++                ),
++                page.locator(
++                    'xpath=(//*[contains(@class, "semi-portal") or contains(@class, "semi-popover") or contains(@class, "semi-dropdown")]//*[contains(@class, "semi-list-row")])[1]'
++                ),
++            ]
++            for option_locator in first_option_locators:
++                try:
++                    if not await option_locator.count():
++                        continue
++                    await option_locator.first.wait_for(state="visible", timeout=5000)
++                    await option_locator.first.click(force=True, timeout=5000)
++                    return True
++                except Exception:
++                    continue
++            option_locators = []
++            for variant in location_variants:
++                option_locators.append(
++                    page.locator(
++                        f'xpath=//*[contains(@class, "semi-portal") or contains(@class, "semi-popover") or contains(@class, "semi-dropdown")]//*[normalize-space(.)="{variant}" and not(self::input) and not(self::textarea)]'
++                    )
++                )
++                option_locators.append(
++                    page.locator(
++                        f'xpath=//*[contains(@class, "semi-portal") or contains(@class, "semi-popover") or contains(@class, "semi-dropdown")]//*[starts-with(normalize-space(.), "{variant}") and not(self::input) and not(self::textarea)]'
++                    )
++                )
++                option_locators.append(
++                    page.locator(
++                        f'xpath=//*[contains(@class, "semi-portal") or contains(@class, "semi-popover") or contains(@class, "semi-dropdown")]//*[contains(normalize-space(.), "{variant}") and not(self::input) and not(self::textarea)]'
++                    )
++                )
++            for option_locator in option_locators:
++                try:
++                    if not await option_locator.count():
++                        continue
++                    await option_locator.first.wait_for(state="visible", timeout=5000)
++                    await option_locator.first.click(force=True, timeout=5000)
++                    return True
++                except Exception:
++                    continue
++            try:
++                await page.keyboard.press("ArrowDown")
++                await page.keyboard.press("Enter")
++                await page.wait_for_timeout(500)
++                return True
++            except Exception:
++                return False
++            return False
++
++        async def wait_for_location_options():
++            for _ in range(20):
++                try:
++                    option_text = await page.locator(
++                        'xpath=(//*[contains(@class, "semi-portal") or contains(@class, "semi-popover") or contains(@class, "semi-dropdown")]//*[contains(@class, "semi-select-option") or @role="option" or contains(@class, "semi-list-row")])[1]'
++                    ).inner_text(timeout=1000)
++                    if option_text.strip() and ("银泰" in option_text or "慈溪" in option_text):
++                        return
++                except Exception:
++                    pass
++                await page.wait_for_timeout(500)
++            options_debug_path = Path(BASE_DIR) / "logs" / "douyin_location_options_wait_failed.png"
++            await page.screenshot(path=str(options_debug_path), full_page=True)
++            douyin_logger.error(_msg("📍", f"输入位置后候选列表没有刷新，截图已保存: {options_debug_path}"))
++            raise RuntimeError("location options did not appear")
++
++        async def assert_location_selected():
++            await page.wait_for_timeout(800)
++            selected_text = ""
++            try:
++                selected_text = (await page.locator(
++                    'xpath=//*[normalize-space(.)="添加标签"]/following::*[contains(normalize-space(.), "银泰")][1]'
++                ).inner_text(timeout=2000)).strip()
++            except Exception:
++                pass
++            if "银泰" in selected_text and ("店)" not in selected_text or "店" in location_query):
++                return
++            location_debug_path = Path(BASE_DIR) / "logs" / "douyin_location_not_selected.png"
++            await page.screenshot(path=str(location_debug_path), full_page=True)
++            douyin_logger.error(_msg("📍", f"地理位置没有真正选中，截图已保存: {location_debug_path}"))
++            raise RuntimeError("location was not selected")
++
++        async def finalize_location_select(success_message: str):
++            try:
++                if not await choose_location_option():
++                    raise RuntimeError(f"location option not found: {location_query}")
++                await assert_location_selected()
++            except Exception:
++                location_debug_path = Path(BASE_DIR) / "logs" / "douyin_location_no_match.png"
++                await page.screenshot(path=str(location_debug_path), full_page=True)
++                douyin_logger.error(_msg("📍", f"没有找到「{location_query}」候选，截图已保存: {location_debug_path}"))
++                raise
++            douyin_logger.info(_msg("📍", success_message))
++
++        async def type_location_into_input(input_locator):
++            current_input = input_locator
++            visible_inputs = page.locator(
++                'input[placeholder*="输入城市+位置名称搜索"], input[placeholder*="输入相关位置"], input[placeholder*="输入地理位置"]'
++            )
++            for i in range(await visible_inputs.count()):
++                candidate = visible_inputs.nth(i)
++                box = await candidate.bounding_box()
++                if box and box["width"] > 50 and box["height"] > 10:
++                    current_input = candidate
++                    break
++
++            await current_input.wait_for(state="visible", timeout=5000)
++            await current_input.click(force=True, timeout=5000)
++            await page.keyboard.press("Control+KeyA")
++            await page.keyboard.press("Backspace")
++            await page.wait_for_timeout(300)
++            await page.keyboard.type(location_query, delay=80)
++            await wait_for_location_options()
++            input_value = (await current_input.input_value()).strip()
++            if location_query not in input_value:
++                type_debug_path = Path(BASE_DIR) / "logs" / "douyin_location_input_failed.png"
++                await page.screenshot(path=str(type_debug_path), full_page=True)
++                douyin_logger.error(_msg("📍", f"位置输入框未写入目标文案，截图已保存: {type_debug_path}"))
++                raise RuntimeError(f"location input value mismatch: {input_value}")
++
++        row_location_input = page.locator(
++            'xpath=(//*[normalize-space(.)="添加标签"]/following::input[contains(@placeholder, "输入城市+位置名称搜索") or contains(@placeholder, "输入相关位置") or contains(@placeholder, "输入地理位置")])[1]'
++        ).first
++        inline_location_input = page.locator(
++            'input[placeholder*="输入城市+位置名称搜索"], input[placeholder*="输入相关位置"], input[placeholder*="输入地理位置"]'
++        ).last
++        if await inline_location_input.count():
++            preferred_input = row_location_input if await row_location_input.count() else inline_location_input
++            await preferred_input.click(force=True, timeout=5000)
++            if not await switch_to_domestic_if_present():
++                raise RuntimeError("domestic tab not found")
++            preferred_input = row_location_input if await row_location_input.count() else inline_location_input
++            await type_location_into_input(preferred_input)
++            await page.wait_for_timeout(3000)
++            await finalize_location_select(f"地理位置已选择: {location_query}")
++            return
++
++        inline_location_trigger = page.locator(
++            'xpath=//*[contains(normalize-space(.), "输入相关位置")]'
++        ).last
++        if await inline_location_trigger.count():
++            await inline_location_trigger.click(force=True, timeout=5000)
++            if not await switch_to_domestic_if_present():
++                raise RuntimeError("domestic tab not found")
++            await page.keyboard.press("Control+KeyA")
++            await page.keyboard.press("Backspace")
++            await page.keyboard.type(location_query)
++            await page.wait_for_timeout(3000)
++            await finalize_location_select(f"地理位置已选择: {location_query}")
++            return
++
++        location_trigger = page.get_by_text("输入地理位置", exact=True).last
++        try:
++            await location_trigger.wait_for(state="visible", timeout=5000)
++            await location_trigger.click(force=True, timeout=5000)
++        except Exception:
++            add_tag_box = await add_tag_label.bounding_box()
++            if not add_tag_box:
++                raise
++            await page.mouse.click(add_tag_box["x"] + 430, add_tag_box["y"] + 12)
++        await page.wait_for_timeout(500)
++
++        if not await switch_to_domestic_if_present():
++            raise RuntimeError("domestic tab not found")
++        await page.wait_for_timeout(500)
++
++        await page.keyboard.press("Control+KeyA")
+         await page.keyboard.press("Backspace")
+-        await page.wait_for_timeout(2000)
+-        await page.keyboard.type(location)
+-        await page.wait_for_selector('div[role="listbox"] [role="option"]', timeout=5000)
+-        await page.locator('div[role="listbox"] [role="option"]').first.click()
++        await page.keyboard.type(location_query)
++        await page.wait_for_timeout(3000)
++
++        await finalize_location_select(f"国内地理位置已选择: {location_query}")
+ 
+     async def handle_product_dialog(self, page: Page, product_title: str):
+         await page.wait_for_timeout(2000)
+@@ -434,6 +705,18 @@ class DouYinBaseUploader(BaseVideoUploader):
+ 
+     async def select_bgm(self, page: Page, bgm_name: str) -> bool:
+         """为图文发布选择 BGM：可选增强功能，搜索无结果或异常均跳过不中断发布。"""
++        if bgm_name.strip().lower() in ("auto", "first", "default", "推荐", "第一首"):
++            try:
++                return await select_first_music_from_automa(
++                    page,
++                    Path(BASE_DIR) / "logs",
++                    log=lambda message: douyin_logger.info(_msg("🎵", message)),
++                )
++            except Exception as exc:
++                douyin_logger.warning(_msg("🎵", f"按 Automa 选择音乐失败，跳过该步骤继续发布：{exc}"))
++                await self._close_music_sidesheet(page)
++                return False
++
+         try:
+             # 点击「选择音乐」按钮
+             music_entry = page.locator('text="选择音乐"').nth(1)
+@@ -482,11 +765,18 @@ class DouYinBaseUploader(BaseVideoUploader):
+ 
+             return True
+         except Exception as exc:
+-            douyin_logger.warning(_msg("🎵", f"添加 BGM 时出错，跳过该步骤继续发布：{exc}"))
++            douyin_logger.warning(_msg("🎵", f"搜索 BGM 时出错，尝试按 Automa 选择第一首推荐音乐：{exc}"))
+             try:
+-                await self._close_music_sidesheet(page)
++                return await select_first_music_from_automa(
++                    page,
++                    Path(BASE_DIR) / "logs",
++                    log=lambda message: douyin_logger.info(_msg("🎵", message)),
++                )
+             except Exception:
+-                pass
++                try:
++                    await self._close_music_sidesheet(page)
++                except Exception:
++                    pass
+             return False
+ 
+     async def _close_music_sidesheet(self, page: Page) -> None:
+@@ -512,6 +802,7 @@ class DouYinVideo(DouYinBaseUploader):
+         productTitle="",
+         thumbnail_portrait_path=None,
+         desc: str | None = None,
++        location: str = "",
+         publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE,
+         debug: bool = DEBUG_MODE,
+         headless: bool = LOCAL_CHROME_HEADLESS,
+@@ -531,6 +822,7 @@ class DouYinVideo(DouYinBaseUploader):
+         self.productLink = productLink
+         self.productTitle = productTitle
+         self.desc = desc or ""
++        self.location = location
+ 
+     async def validate_upload_args(self):
+         await self.validate_base_args()
+@@ -620,10 +912,13 @@ class DouYinVideo(DouYinBaseUploader):
+         douyin_logger.info(_msg("🥳", "上传前检查通过"))
+ 
+         browser = await playwright.chromium.launch(headless=self.headless, channel="chromium")
+-        context = await browser.new_context(
+-            storage_state=f"{self.account_file}",
+-            permissions=["geolocation"],
+-        )
++        context_options = {
++            "storage_state": f"{self.account_file}",
++            "permissions": ["geolocation"],
++        }
++        if "合肥" in self.location:
++            context_options["geolocation"] = {"latitude": 31.713518, "longitude": 117.298786}
++        context = await browser.new_context(**context_options)
+         context = await set_init_script(context)
+ 
+         page = await context.new_page()
+@@ -680,6 +975,8 @@ class DouYinVideo(DouYinBaseUploader):
+             await self.set_product_link(page, self.productLink, self.productTitle)
+             douyin_logger.info(_msg("🥳", "商品链接设置完成"))
+ 
++        await self.set_location(page, self.location)
++
+         await self.set_thumbnail(page)
+ 
+         await self.set_self_declaration(page)
+@@ -692,12 +989,17 @@ class DouYinVideo(DouYinBaseUploader):
+         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
+             await self.set_schedule_time_douyin(page, self.publish_date)
+ 
+-        while True:
++        publish_attempts = 0
++        while publish_attempts < 90:
+             try:
+                 # 移除会拦截发布按钮点击的新手引导/话题下拉浮层
+                 await page.evaluate(
+                     "() => { document.querySelectorAll('.shepherd-element, .shepherd-modal-overlay-container, [class*=\"mention-wrapper\"]').forEach(e => e.remove()); }"
+                 )
++                if self.debug and publish_attempts == 0:
++                    before_publish_path = Path(BASE_DIR) / "logs" / "douyin_before_publish.png"
++                    await page.screenshot(path=str(before_publish_path), full_page=True)
++                    douyin_logger.info(_msg("📸", f"发布前截图已保存: {before_publish_path}"))
+                 publish_button = page.get_by_role("button", name="发布", exact=True)
+                 if await publish_button.count():
+                     await publish_button.click(force=True)
+@@ -708,11 +1010,15 @@ class DouYinVideo(DouYinBaseUploader):
+                 douyin_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
+                 break
+             except Exception:
++                publish_attempts += 1
+                 await self.handle_auto_video_cover(page)
+                 douyin_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
+                 if self.debug:
+-                    await page.screenshot(full_page=True)
++                    retry_path = Path(BASE_DIR) / "logs" / "douyin_publish_retry.png"
++                    await page.screenshot(path=str(retry_path), full_page=True)
+                 await asyncio.sleep(0.5)
++        else:
++            raise RuntimeError("抖音发布未跳转到作品管理页，请查看 logs/douyin_publish_retry.png")
+ 
+         await context.storage_state(path=self.account_file)
+         douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
+@@ -741,6 +1047,7 @@ class DouYinNote(DouYinBaseUploader):
+         debug: bool = DEBUG_MODE,
+         headless: bool = LOCAL_CHROME_HEADLESS,
+         bgm: str = "",
++        location: str = "",
+     ):
+         super().__init__(
+             publish_date=publish_date,
+@@ -754,6 +1061,7 @@ class DouYinNote(DouYinBaseUploader):
+         self.title = title or (self.note[:30] if self.note else "")
+         self.tags = tags or []
+         self.bgm = bgm or ""
++        self.location = location
+ 
+     async def validate_upload_args(self):
+         await self.validate_base_args()
+@@ -814,23 +1122,146 @@ class DouYinNote(DouYinBaseUploader):
+         if self.bgm:
+             await self.select_bgm(page, self.bgm)
+ 
++        await self.set_location(page, self.location)
++
+         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
+             await self.set_schedule_time_douyin(page, self.publish_date)
+ 
+-        while True:
++        async def click_if_exists(locator, timeout=1500):
+             try:
+-                publish_button = page.get_by_role("button", name="发布", exact=True)
+-                if await publish_button.count():
+-                    await publish_button.click()
+-                await page.wait_for_url(
+-                    "**/creator-micro/content/manage?enter_from=publish**",
+-                    timeout=3000,
+-                )
+-                douyin_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
+-                break
++                if await locator.count():
++                    await locator.first.click(force=True, timeout=timeout)
++                    await page.wait_for_timeout(500)
++                    return True
+             except Exception:
+-                douyin_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
++                return False
++            return False
++
++        async def click_publish_button():
++            button_box = await page.evaluate(
++                """() => {
++                    const visible = (el) => {
++                        const style = window.getComputedStyle(el);
++                        const rect = el.getBoundingClientRect();
++                        return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
++                    };
++                    const buttons = [...document.querySelectorAll('button,[role="button"],.semi-button')]
++                        .filter((el) => visible(el) && el.innerText.trim() === "发布");
++                    const button = buttons[buttons.length - 1];
++                    if (!button) return null;
++                    button.scrollIntoView({ block: "center", inline: "center" });
++                    const rect = button.getBoundingClientRect();
++                    return {
++                        x: rect.left + rect.width / 2,
++                        y: rect.top + rect.height / 2,
++                        text: button.innerText.trim(),
++                        disabled: Boolean(button.disabled) || button.getAttribute("aria-disabled") === "true",
++                        className: button.className || "",
++                    };
++                }"""
++            )
++            if button_box:
++                douyin_logger.info(_msg("🏃", "点击发布按钮"))
++                await page.mouse.click(button_box["x"], button_box["y"])
++                return True
++
++            fallback = page.locator('xpath=//*[normalize-space(.)="发布"]').last
++            if await fallback.count():
++                douyin_logger.info(_msg("🏃", "使用文本 fallback 点击发布"))
++                await fallback.click(force=True, timeout=3000)
++                return True
++            return False
++
++        async def handle_publish_dialog():
++            body_text = ""
++            try:
++                body_text = await page.locator("body").inner_text(timeout=2000)
++            except Exception:
++                pass
++            if "获取验证码" in body_text and "选择其他验证方式" in body_text:
++                try:
++                    await page.get_by_text("获取验证码", exact=True).last.click(force=True, timeout=3000)
++                except Exception:
++                    pass
++                douyin_logger.info(_msg("🔐", "抖音要求短信验证，已点击获取验证码"))
++                code = (await asyncio.to_thread(input, "请输入抖音短信验证码并回车: ")).strip()
++                if not code:
++                    raise RuntimeError("empty douyin sms verification code")
++                code_input = page.locator(".uc-ui-input input, input").last
++                await code_input.fill(code)
++                await page.get_by_text("验证", exact=True).last.click(force=True, timeout=5000)
++                await page.wait_for_timeout(3000)
++                return True
++
++            dialog = page.locator('[role="dialog"], .semi-modal, .semi-modal-content').last
++            try:
++                if not await dialog.count():
++                    return False
++                await dialog.wait_for(state="visible", timeout=2000)
++            except Exception:
++                return False
++
++            confirm_texts = ["确认发布", "继续发布", "仍要发布", "发布", "确认", "我知道了"]
++            for _ in range(20):
++                for confirm_text in confirm_texts:
++                    for button in [
++                        dialog.get_by_role("button", name=confirm_text, exact=True),
++                        dialog.get_by_text(confirm_text, exact=True),
++                    ]:
++                        try:
++                            if await button.count():
++                                await button.last.click(force=True, timeout=2000)
++                                await page.wait_for_timeout(1000)
++                                return True
++                        except Exception:
++                            continue
++                await page.wait_for_timeout(1000)
++
++            dialog_debug_path = Path(BASE_DIR) / "logs" / "douyin_note_publish_dialog_stuck.png"
++            await page.screenshot(path=str(dialog_debug_path), full_page=True)
++            douyin_logger.error(_msg("😵", f"发布确认弹窗未加载可点击按钮，截图已保存: {dialog_debug_path}"))
++            raise RuntimeError("publish dialog did not expose a confirm button")
++
++        async def wait_for_publish_result(timeout_seconds: int = 90):
++            deadline = asyncio.get_running_loop().time() + timeout_seconds
++            while asyncio.get_running_loop().time() < deadline:
++                if re.search(r"/creator-micro/content/manage", page.url):
++                    douyin_logger.success(_msg("🥳", "图文发布成功，已进入作品管理页"))
++                    return True
++                body_text = ""
++                try:
++                    body_text = await page.locator("body").inner_text(timeout=1000)
++                except Exception:
++                    pass
++                for success_text in ["发布成功", "上传成功", "审核中"]:
++                    if success_text in body_text:
++                        douyin_logger.success(_msg("🥳", f"图文发布成功，命中页面标识: {success_text}"))
++                        return True
++                if "获取验证码" in body_text and "选择其他验证方式" in body_text:
++                    await handle_publish_dialog()
++                if "正在发布" in body_text:
++                    douyin_logger.info(_msg("🏃", "平台正在发布，继续等待结果"))
++                await page.wait_for_timeout(3000)
++            return False
++
++        for publish_attempt in range(1, 4):
++            try:
++                if not await click_publish_button():
++                    raise RuntimeError("publish button not found")
++                await page.wait_for_timeout(1000)
++                if await handle_publish_dialog():
++                    douyin_logger.info(_msg("🏃", "已处理发布确认弹窗"))
++                if await wait_for_publish_result():
++                    return
++                raise RuntimeError("publish result timeout")
++            except Exception:
++                douyin_logger.info(_msg("🏃", f"小人正在冲刺发布图文({publish_attempt}/3)，当前页面: {page.url}"))
+                 await asyncio.sleep(0.5)
++        else:
++            publish_debug_path = Path(BASE_DIR) / "logs" / "douyin_note_publish_failed.png"
++            await page.screenshot(path=str(publish_debug_path), full_page=True)
++            douyin_logger.error(_msg("😵", f"图文发布未成功，截图已保存: {publish_debug_path}"))
++            raise RuntimeError("douyin note publish did not finish")
+ 
+     async def upload(self, playwright: Playwright) -> None:
+         douyin_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
+@@ -838,10 +1269,13 @@ class DouYinNote(DouYinBaseUploader):
+         douyin_logger.info(_msg("🥳", "图文上传前检查通过"))
+ 
+         browser = await playwright.chromium.launch(headless=self.headless, channel="chromium")
+-        context = await browser.new_context(
+-            storage_state=f"{self.account_file}",
+-            permissions=["geolocation"],
+-        )
++        context_options = {
++            "storage_state": f"{self.account_file}",
++            "permissions": ["geolocation"],
++        }
++        if "合肥" in self.location:
++            context_options["geolocation"] = {"latitude": 31.713518, "longitude": 117.298786}
++        context = await browser.new_context(**context_options)
+         context = await set_init_script(context)
+ 
+         upload_success = False
+@@ -858,6 +1292,9 @@ class DouYinNote(DouYinBaseUploader):
+                 await context.storage_state(path=self.account_file)
+                 douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
+                 await asyncio.sleep(2)
++            elif os.environ.get("DOUYIN_KEEP_OPEN_ON_ERROR", "").lower() in ("1", "true", "yes"):
++                douyin_logger.error(_msg("😵", "流程出错，浏览器保持打开，等待人工/脚本继续处理"))
++                await asyncio.Event().wait()
+             await context.close()
+             await browser.close()
+ 
+diff --git a/uploader/douyin_uploader/location_picker.py b/uploader/douyin_uploader/location_picker.py
+new file mode 100644
+index 0000000..919c471
+--- /dev/null
++++ b/uploader/douyin_uploader/location_picker.py
+@@ -0,0 +1,237 @@
++# -*- coding: utf-8 -*-
++from __future__ import annotations
++
++from pathlib import Path
++from typing import Awaitable, Callable
++
++from patchright.async_api import Page
++
++
++LogFn = Callable[[str], Awaitable[None] | None]
++
++
++async def _log(log: LogFn | None, message: str) -> None:
++    if not log:
++        return
++    result = log(message)
++    if hasattr(result, "__await__"):
++        await result
++
++
++async def _screenshot(page: Page, screenshot_dir: Path | None, name: str) -> None:
++    if not screenshot_dir:
++        return
++    screenshot_dir.mkdir(parents=True, exist_ok=True)
++    await page.screenshot(path=str(screenshot_dir / name), full_page=True)
++
++
++AUTOMA_LOCATION_TRIGGER = ".select-Ht3mEC .semi-select-selection-text"
++AUTOMA_DOMESTIC_TAB = "div.item-text-normal-MC1UEg"
++AUTOMA_LOCATION_INPUT = ".semi-select-input > .semi-input"
++AUTOMA_FIRST_LOCATION_OPTION = ".semi-select-option-focused .detail-v2-uZaTIm"
++
++
++def _normalize_location_text(text: str) -> str:
++    return "".join(ch for ch in text if ch.isalnum())
++
++
++def _location_queries(location: str) -> list[str]:
++    queries: list[str] = []
++
++    def add(query: str) -> None:
++        query = query.strip()
++        if query and query not in queries:
++            queries.append(query)
++
++    if "合肥" in location and "滨湖" in location and "银泰" in location:
++        add("合肥滨湖银泰城")
++        add("滨湖银泰城")
++
++    add(location)
++    add(location.replace("银泰百货", "银泰"))
++    add(location.replace("百货", ""))
++
++    if "慈溪" in location:
++        add("慈溪银泰百货")
++        add("慈溪城西银泰")
++        add("银泰百货(慈溪城西店)")
++
++    return queries
++
++
++def _location_option_score(option_text: str, location: str, query: str) -> int:
++    text = _normalize_location_text(option_text)
++    target = _normalize_location_text(location)
++    query_text = _normalize_location_text(query)
++    first_line = _normalize_location_text((option_text.strip().splitlines() or [""])[0])
++
++    score = 0
++    if target and target in text:
++        score += 120
++    if query_text and query_text in text:
++        score += 100
++    for token in ("合肥", "滨湖", "慈溪", "城西", "银泰", "银泰城", "百货"):
++        if token in location and token in option_text:
++            score += 25
++    if "商场内有多家门店" in option_text:
++        score += 40
++    if "银泰城" in option_text or "百货" in option_text:
++        score += 20
++    if ("店" in first_line or "店" in option_text[:30]) and "店" not in location:
++        score -= 80
++    return score
++
++
++async def _click_first_visible(locator, timeout: int = 5000) -> bool:
++    count = await locator.count()
++    for i in range(count - 1, -1, -1):
++        item = locator.nth(i)
++        try:
++            await item.wait_for(state="visible", timeout=timeout)
++            await item.click(force=True, timeout=timeout)
++            return True
++        except Exception:
++            continue
++    return False
++
++
++async def _first_visible(locator, timeout: int = 5000):
++    count = await locator.count()
++    for i in range(count):
++        item = locator.nth(i)
++        try:
++            await item.wait_for(state="visible", timeout=timeout)
++            return item
++        except Exception:
++            continue
++    return None
++
++
++async def _type_query(page: Page, location_input, query: str) -> None:
++    if location_input:
++        await location_input.click(force=True, timeout=5000)
++        await page.keyboard.press("Meta+A")
++        await page.keyboard.press("Backspace")
++        await location_input.type(query, delay=80)
++        await location_input.dispatch_event("change")
++    else:
++        await page.keyboard.press("Meta+A")
++        await page.keyboard.press("Backspace")
++        await page.keyboard.type(query, delay=80)
++
++
++async def _select_add_tag_value(page: Page, row_label: str, value: str, select_index: int) -> bool:
++    select = page.locator(
++        f'xpath=(//*[normalize-space(.)="{row_label}"]/following::*[contains(@class, "semi-select")])[{select_index}]'
++    )
++    if not await select.count():
++        return False
++    try:
++        current = (await select.inner_text(timeout=2000)).strip()
++        if value in current:
++            await page.keyboard.press("Escape")
++            return True
++        await select.click(force=True, timeout=5000)
++        await page.wait_for_timeout(300)
++        option = page.locator(
++            f'xpath=(//*[contains(@class, "semi-portal") or contains(@class, "semi-popover") or contains(@class, "semi-dropdown")]//*[normalize-space(.)="{value}" or contains(normalize-space(.), "{value}")])[1]'
++        )
++        await option.wait_for(state="visible", timeout=5000)
++        await option.click(force=True, timeout=5000)
++        await page.wait_for_timeout(500)
++        await page.keyboard.press("Escape")
++        await page.wait_for_timeout(200)
++        return True
++    except Exception:
++        return False
++
++
++async def _select_best_location_option(page: Page, location: str, query: str):
++    locators = [
++        page.locator(AUTOMA_FIRST_LOCATION_OPTION),
++        page.locator(".semi-select-option"),
++        page.locator('[role="option"]'),
++        page.locator(".semi-popover .detail-v2-uZaTIm"),
++        page.locator(".semi-portal .detail-v2-uZaTIm"),
++    ]
++    candidates = []
++    for locator in locators:
++        count = min(await locator.count(), 10)
++        for i in range(count):
++            item = locator.nth(i)
++            try:
++                await item.wait_for(state="visible", timeout=1000)
++                text = (await item.inner_text(timeout=1000)).strip()
++            except Exception:
++                continue
++            if not text:
++                continue
++            score = _location_option_score(text, location, query)
++            candidates.append((score, text, item))
++
++    candidates.sort(key=lambda candidate: candidate[0], reverse=True)
++    if not candidates or candidates[0][0] < 70:
++        return ""
++
++    _, selected_text, selected = candidates[0]
++    await selected.click(force=True, timeout=5000)
++    return selected_text
++
++
++async def add_douyin_groupbuy_location(
++    page: Page,
++    location: str,
++    screenshot_dir: Path | None = None,
++    log: LogFn | None = None,
++) -> None:
++    """Select the first domestic POI result after typing the requested location."""
++    location = location.strip()
++    if not location:
++        return
++
++    await _log(log, f"设置地理位置: {location}")
++    await page.evaluate(
++        "() => document.querySelectorAll('.shepherd-element,.shepherd-modal-overlay-container').forEach(e => e.remove())"
++    )
++    await page.keyboard.press("Escape")
++
++    add_tag_label = page.get_by_text("添加标签", exact=True).first
++    await add_tag_label.scroll_into_view_if_needed(timeout=10000)
++
++    if not await _select_add_tag_value(page, "添加标签", "位置", 1):
++        await _screenshot(page, screenshot_dir, "douyin_location_select_position_failed.png")
++        raise RuntimeError("location tag type not selected")
++    if not await _select_add_tag_value(page, "添加标签", "带货模式", 2):
++        await _log(log, "未显式点到带货模式，继续检查位置输入框")
++
++    trigger_clicked = False
++    location_trigger = page.locator(AUTOMA_LOCATION_TRIGGER).first
++    try:
++        await location_trigger.wait_for(state="visible", timeout=10000)
++        await location_trigger.click(force=True, timeout=5000)
++        await page.wait_for_timeout(700)
++        trigger_clicked = True
++    except Exception:
++        fallback_input = await _first_visible(
++            page.locator(
++                'input[placeholder*="输入城市+位置名称搜索"], input[placeholder*="输入相关位置"], input[placeholder*="输入地理位置"]'
++            ),
++            timeout=3000,
++        )
++        if fallback_input:
++            await fallback_input.click(force=True, timeout=5000)
++            await page.wait_for_timeout(500)
++        else:
++            await _screenshot(page, screenshot_dir, "douyin_location_input_not_visible.png")
++            raise
++
++    if trigger_clicked:
++        domestic_tabs = [
++            page.locator(AUTOMA_DOMESTIC_TAB).filter(has_text="国内"),
++            page.locator('.semi-popover:has-text("国内")').get_by_text("国内", exact=True),
++            page.locator('.semi-portal:has-text("国内")').get_by_text("国内", exact=True),
++            page.get_by_text("国内", exact=True),
++        ]
++        try:
++            clicked = False
++            for domestic_tab in domestic_tabs:
++                if await _click_first_visible(domestic_tab, timeout=3000):
++                    clicked = True
++                    break
++            if not clicked:
++                raise RuntimeError("domestic tab not found")
++            await page.wait_for_timeout(500)
++        except Exception:
++            await _screenshot(page, screenshot_dir, "douyin_location_domestic_tab_missing.png")
++            raise RuntimeError("domestic tab not found")
++
++    location_inputs = [
++        page.locator(
++            'xpath=(//*[normalize-space(.)="添加标签"]/following::input[contains(@placeholder, "输入城市+位置名称搜索") or contains(@placeholder, "输入相关位置") or contains(@placeholder, "输入地理位置")])[1]'
++        ),
++        page.locator('input[placeholder*="输入城市+位置名称搜索"]'),
++        page.locator('input[placeholder*="输入相关位置"]'),
++        page.locator(AUTOMA_LOCATION_INPUT),
++    ]
++    location_input = None
++    for candidate in location_inputs:
++        location_input = await _first_visible(candidate, timeout=3000)
++        if location_input:
++            break
++    if not location_input:
++        await _log(log, "未定位到位置输入框，尝试向当前聚焦输入框键盘输入")
++
++    queries = _location_queries(location)
++    selected_text = ""
++    for query in queries:
++        try:
++            await _type_query(page, location_input, query)
++            await page.wait_for_timeout(2500)
++        except Exception:
++            await _screenshot(page, screenshot_dir, "douyin_location_type_failed.png")
++            raise
++        selected_text = await _select_best_location_option(page, location, query)
++        if selected_text:
++            break
++    if not selected_text:
++        await _screenshot(page, screenshot_dir, "douyin_location_options_not_ready.png")
++        raise RuntimeError("location options did not appear after typing")
++
++    await page.wait_for_timeout(1000)
++
++    selected = page.locator(
++        'xpath=(//*[normalize-space(.)="添加标签"]/following::*[contains(normalize-space(.), "银泰") or contains(normalize-space(.), "慈溪")])[1]'
++    ).first
++    try:
++        selected_text = (await selected.inner_text(timeout=3000)).strip()
++    except Exception:
++        selected_text = ""
++    if _location_option_score(selected_text, location, queries[0]) < 70:
++        await _screenshot(page, screenshot_dir, "douyin_location_not_selected.png")
++        raise RuntimeError("location was not selected")
++
++    await _log(log, f"地理位置已选择: {selected_text}")
+diff --git a/uploader/douyin_uploader/music_picker.py b/uploader/douyin_uploader/music_picker.py
+new file mode 100644
+index 0000000..e528a72
+--- /dev/null
++++ b/uploader/douyin_uploader/music_picker.py
+@@ -0,0 +1,63 @@
++# -*- coding: utf-8 -*-
++from __future__ import annotations
++
++from pathlib import Path
++from typing import Awaitable, Callable
++
++from patchright.async_api import Page
++
++
++LogFn = Callable[[str], Awaitable[None] | None]
++
++AUTOMA_MUSIC_TRIGGER = "span.action-Q1y01k"
++AUTOMA_FIRST_MUSIC_USE = ".card-container-tmocjc:nth-child(1) .semi-button-content"
++
++
++async def _log(log: LogFn | None, message: str) -> None:
++    if not log:
++        return
++    result = log(message)
++    if hasattr(result, "__await__"):
++        await result
++
++
++async def _screenshot(page: Page, screenshot_dir: Path | None, name: str) -> None:
++    if not screenshot_dir:
++        return
++    screenshot_dir.mkdir(parents=True, exist_ok=True)
++    await page.screenshot(path=str(screenshot_dir / name), full_page=True)
++
++
++async def select_first_music_from_automa(
++    page: Page,
++    screenshot_dir: Path | None = None,
++    log: LogFn | None = None,
++) -> bool:
++    await _log(log, "按 Automa 链路选择第一首推荐音乐")
++    await page.locator("html").evaluate("el => window.scrollBy({ top: 452, behavior: 'smooth' })")
++    await page.wait_for_timeout(800)
++
++    trigger = page.locator(AUTOMA_MUSIC_TRIGGER).first
++    try:
++        await trigger.wait_for(state="visible", timeout=10000)
++        await trigger.click(force=True, timeout=5000)
++    except Exception:
++        await _screenshot(page, screenshot_dir, "douyin_music_trigger_not_found.png")
++        raise
++
++    use_button = page.locator(AUTOMA_FIRST_MUSIC_USE).first
++    try:
++        await use_button.wait_for(state="attached", timeout=15000)
++        await use_button.evaluate(
++            """el => {
++                const button = el.closest('button') || el;
++                button.click();
++            }"""
++        )
++        await page.wait_for_timeout(1000)
++    except Exception:
++        await _screenshot(page, screenshot_dir, "douyin_music_first_use_not_found.png")
++        raise
++
++    await _log(log, "第一首推荐音乐已选择")
++    return True
+diff --git a/uploader/douyin_uploader/product_selector.py b/uploader/douyin_uploader/product_selector.py
+new file mode 100644
+index 0000000..978f43f
+--- /dev/null
++++ b/uploader/douyin_uploader/product_selector.py
+@@ -0,0 +1,368 @@
++# -*- coding: utf-8 -*-
++from __future__ import annotations
++
++import re
++from datetime import datetime
++from pathlib import Path
++from typing import Any
++from urllib.parse import urljoin
++
++from patchright.async_api import Page
++from patchright.async_api import BrowserContext
++from patchright.async_api import async_playwright
++
++from conf import BASE_DIR, LOCAL_CHROME_HEADLESS
++from utils.base_social_media import set_init_script
++from utils.log import douyin_logger
++
++
++DEFAULT_GROUP_ID = "1748531528342532"
++DATA_LIST_URL = "https://www.life-data.cn/product/my/chain/list?groupid={groupid}"
++LAIKE_HOME_URL = "https://life.douyin.com/p/home?groupid={groupid}"
++GOODS_LIST_URL = "https://life.douyin.com/p/goods-list?groupid={groupid}&industry=tobias"
++
++
++def _clean(text: str) -> str:
++    return re.sub(r"\s+", " ", text or "").strip()
++
++
++def _lines(text: str) -> list[str]:
++    return [line.strip() for line in (text or "").splitlines() if line.strip()]
++
++
++def _looks_like_product_name(line: str) -> bool:
++    if "【" in line and "】" in line:
++        return True
++    return bool(re.search(r"(券|卡|团购|权益|套餐|洗|餐饮|观影|奶茶|冰淇淋)", line))
++
++
++def _pick_name(lines: list[str], index: int) -> str:
++    for offset in range(1, 7):
++        pos = index - offset
++        if pos < 0:
++            break
++        candidate = lines[pos]
++        if _looks_like_product_name(candidate) and len(candidate) <= 80:
++            return candidate
++    return ""
++
++
++def _metric_value(lines: list[str], index: int, metric: str) -> str:
++    metric_keys = [metric, "成交券数", "商品成交券数"]
++    ranges = [(index, min(len(lines), index + 18)), (max(0, index - 12), index)]
++    for start, end in ranges:
++        for i in range(start, end):
++            if not any(key and key in lines[i] for key in metric_keys):
++                continue
++            for j in range(i, min(i + 5, end)):
++                if re.search(r"(?:商品)?ID[:：]?\s*\d{10,}", lines[j]):
++                    continue
++                value = re.search(r"([0-9][0-9,]*(?:\.[0-9]+)?)", lines[j])
++                if value:
++                    return value.group(1)
++    return ""
++
++
++def parse_product_candidates(page_text: str, metric: str = "商品成交券数", limit: int = 3) -> list[dict[str, Any]]:
++    """Parse ranking candidates from the Shengyijing product-ranking page text."""
++    rows: list[dict[str, Any]] = []
++    seen_ids: set[str] = set()
++    lines = _lines(page_text)
++    for index, line in enumerate(lines):
++        match = re.search(r"(?:商品)?ID[:：]?\s*(\d{10,})", line)
++        if not match:
++            continue
++        product_id = match.group(1)
++        if product_id in seen_ids:
++            continue
++        name = _pick_name(lines, index)
++        if not name:
++            continue
++        seen_ids.add(product_id)
++        start = max(0, index - 5)
++        end = min(len(lines), index + 14)
++        rows.append(
++            {
++                "rank": len(rows) + 1,
++                "product_id": product_id,
++                "name": name,
++                "metric": metric,
++                "metric_value": _metric_value(lines, index, metric),
++                "ranking_excerpt": "\n".join(lines[start:end]),
++            }
++        )
++        if len(rows) >= limit:
++            break
++    return rows
++
++
++def build_public_content(product: dict[str, Any], location: str = "") -> dict[str, str]:
++    """Create public-facing copy. Do not expose product IDs or backend sales numbers."""
++    name = _clean(product.get("name", "本地团购卡券"))
++    detail_text = _clean(product.get("detail", {}).get("detail_text", ""))
++    row_text = _clean(product.get("detail", {}).get("row_text", ""))
++    source_text = detail_text or row_text
++    store = location or _guess_store(source_text) or "门店"
++    short_store = store.replace("百货", "").replace("商场", "")
++    product_label = re.sub(r"^【[^】]+】", "", name).replace("【C】", "").strip() or name
++    title = f"{short_store}这张先囤"[:20]
++    caption = (
++        f"最近想逛{store}，这张{product_label}可以先看看。\n\n"
++        "适合顺路逛街、吃喝和到店消费前先囤一张。下单前重点看三件事："
++        "可用门店、使用日期、是否需要额外支付。\n\n"
++        "看到合适就先领，真正到店前再确认规则，别错过本地生活小福利。\n\n"
++        "#本地生活 #银泰百货 #团购券 #逛吃攻略 #同城优惠"
++    )
++    return {
++        "title": title,
++        "caption": caption,
++        "location": store,
++        "product_label": product_label,
++    }
++
++
++def build_image_prompts(product: dict[str, Any], public: dict[str, str]) -> list[str]:
++    name = public["product_label"]
++    store = public["location"]
++    return [
++        (
++            "竖版抖音图文封面海报，真实商场团购推广风格，明亮高点击，"
++            f"主题是{store}本地卡券，主标题突出“先囤再逛”，副标题包含{name}，"
++            "画面像真实门店外景和年轻消费者逛商场，不出现商品ID、成交张数、后台数据。"
++        ),
++        (
++            "竖版团购信息海报，真实生活方式摄影质感，展示消费者逛街前先看券的场景，"
++            f"核心卖点是{name}，强调到店前看可用门店和使用日期，"
++            "排版清晰，适合抖音图文第二张。"
++        ),
++        (
++            "竖版本地生活卡券攻略海报，画面包含手机下单界面氛围、商场灯光、朋友结伴逛吃，"
++            f"地点感为{store}，文案方向是“买前看规则，适合再下单”，"
++            "不要出现后台销量、排名或商品ID。"
++        ),
++        (
++            "竖版行动转化海报，真实人物拿手机准备下单，商场背景清晰，"
++            f"主题为{store}卡券福利，按钮感文案“现在去看看”，"
++            "整体红白高对比，适合抖音图文最后一张引导购买。"
++        ),
++    ]
++
++
++def _guess_store(text: str) -> str:
++    patterns = [
++        r"([\u4e00-\u9fa5A-Za-z0-9（）()·-]{2,24}银泰百货)",
++        r"([\u4e00-\u9fa5A-Za-z0-9（）()·-]{2,24}银泰城)",
++    ]
++    for pattern in patterns:
++        match = re.search(pattern, text)
++        if match:
++            return match.group(1)
++    return ""
++
++
++async def _body_text(page: Page) -> str:
++    return await page.locator("body").inner_text(timeout=20000)
++
++
++async def _click_text(page: Page, text: str, exact: bool = True, timeout: int = 4000) -> bool:
++    locator = page.get_by_text(text, exact=exact)
++    count = await locator.count()
++    for i in range(count):
++        item = locator.nth(i)
++        try:
++            await item.wait_for(state="visible", timeout=timeout)
++            await item.click(force=True, timeout=timeout)
++            await page.wait_for_timeout(800)
++            return True
++        except Exception:
++            continue
++    return False
++
++
++async def _visible_image_urls(page: Page) -> list[str]:
++    return await page.evaluate(
++        """() => Array.from(document.images)
++            .map(img => ({
++                src: img.currentSrc || img.src || "",
++                width: img.naturalWidth || img.width || 0,
++                height: img.naturalHeight || img.height || 0
++            }))
++            .filter(img => img.src && img.width >= 40 && img.height >= 40)
++            .slice(0, 20)
++            .map(img => new URL(img.src, location.href).href)"""
++    )
++
++
++async def _open_ranking_page_from_laike(context: BrowserContext, groupid: str) -> Page:
++    page = await context.new_page()
++    await page.goto(LAIKE_HOME_URL.format(groupid=groupid), wait_until="domcontentloaded", timeout=90000)
++    await page.wait_for_timeout(3000)
++    clicked = await _click_text(page, "生意经", exact=False, timeout=5000)
++    if clicked:
++        await page.wait_for_timeout(5000)
++        for candidate in reversed(context.pages):
++            if "life-data.cn" in candidate.url:
++                page = candidate
++                break
++    await page.goto(DATA_LIST_URL.format(groupid=groupid), wait_until="domcontentloaded", timeout=90000)
++    await page.wait_for_timeout(3500)
++    return page
++
++
++async def _extract_row_text(page: Page, product_id: str) -> str:
++    return await page.evaluate(
++        """productId => {
++            const visible = el => {
++                const style = getComputedStyle(el);
++                const rect = el.getBoundingClientRect();
++                return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
++            };
++            const candidates = Array.from(document.querySelectorAll('tr,[class*="row"],[class*="table"],div'))
++                .filter(el => visible(el) && (el.innerText || "").includes(productId))
++                .map(el => (el.innerText || "").trim())
++                .filter(text => text.length > 0 && text.length < 3000)
++                .sort((a, b) => a.length - b.length);
++            return candidates[0] || "";
++        }""",
++        product_id,
++    )
++
++
++async def _click_view_for_product(page: Page, product_id: str) -> bool:
++    return await page.evaluate(
++        """productId => {
++            const visible = el => {
++                const style = getComputedStyle(el);
++                const rect = el.getBoundingClientRect();
++                return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
++            };
++            const containers = Array.from(document.querySelectorAll('tr,[class*="row"],[class*="table"],div'))
++                .filter(el => visible(el) && (el.innerText || "").includes(productId) && (el.innerText || "").includes("查看"))
++                .sort((a, b) => (a.innerText || "").length - (b.innerText || "").length);
++            const container = containers[0];
++            if (!container) return false;
++            const target = Array.from(container.querySelectorAll('button,a,span,div'))
++                .find(el => visible(el) && (el.innerText || "").trim() === "查看");
++            if (!target) return false;
++            target.click();
++            return true;
++        }""",
++        product_id,
++    )
++
++
++async def _search_goods_detail(page: Page, product: dict[str, Any], groupid: str) -> dict[str, Any]:
++    product_id = product["product_id"]
++    await page.goto(GOODS_LIST_URL.format(groupid=groupid), wait_until="domcontentloaded", timeout=90000)
++    await page.wait_for_timeout(2500)
++
++    input_selectors = [
++        'input[placeholder*="商品名称/ID"]',
++        'input[placeholder*="商品名称"]',
++        'input[placeholder*="商品ID"]',
++        'input[placeholder*="请输入"]',
++    ]
++    search_input = None
++    for selector in input_selectors:
++        candidate = page.locator(selector).first
++        if await candidate.count():
++            search_input = candidate
++            break
++    if not search_input:
++        raise RuntimeError("未找到来客商品管理搜索框")
++
++    await search_input.fill(product_id)
++    if not await _click_text(page, "查询", exact=True, timeout=5000):
++        await search_input.press("Enter")
++    await page.wait_for_timeout(3000)
++
++    row_text = await _extract_row_text(page, product_id)
++    detail_text = ""
++    detail_url = page.url
++    image_urls = await _visible_image_urls(page)
++    clicked = await _click_view_for_product(page, product_id)
++    if clicked:
++        await page.wait_for_timeout(2500)
++        detail_url = page.url
++        try:
++            detail_text = await _body_text(page)
++            image_urls = await _visible_image_urls(page)
++        except Exception:
++            detail_text = ""
++
++    return {
++        "goods_list_url": GOODS_LIST_URL.format(groupid=groupid),
++        "detail_url": detail_url,
++        "row_text": row_text,
++        "detail_text": detail_text[:12000],
++        "image_urls": image_urls,
++    }
++
++
++async def select_groupbuy_products(
++    account_file: str,
++    groupid: str = DEFAULT_GROUP_ID,
++    date_filter: str = "昨天",
++    metric: str = "商品成交券数",
++    limit: int = 3,
++    headless: bool = LOCAL_CHROME_HEADLESS,
++    debug: bool = True,
++    cdp_url: str | None = None,
++) -> dict[str, Any]:
++    async with async_playwright() as playwright:
++        should_close_browser = True
++        if cdp_url:
++            browser = await playwright.chromium.connect_over_cdp(cdp_url)
++            context = browser.contexts[0] if browser.contexts else await browser.new_context()
++            should_close_browser = False
++        else:
++            browser = await playwright.chromium.launch(
++                headless=headless,
++                channel="chrome",
++                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
++            )
++            context = await browser.new_context(storage_state=account_file)
++            context = await set_init_script(context)
++        ranking_page = await _open_ranking_page_from_laike(context, groupid)
++        detail_page = await context.new_page()
++        try:
++            await _click_text(ranking_page, date_filter, exact=True)
++            await _click_text(ranking_page, metric, exact=False)
++            await ranking_page.wait_for_timeout(2500)
++
++            page_text = await _body_text(ranking_page)
++            products = parse_product_candidates(page_text, metric=metric, limit=limit)
++            if not products:
++                raise RuntimeError("没有从生意经商品榜单解析到商品ID，请查看截图和 raw_text")
++
++            for product in products:
++                product["detail"] = await _search_goods_detail(detail_page, product, groupid)
++                public = build_public_content(product)
++                product["public"] = public
++                product["image_prompts"] = build_image_prompts(product, public)
++
++            result = {
++                "generated_at": datetime.now().isoformat(timespec="seconds"),
++                "groupid": groupid,
++                "date_filter": date_filter,
++                "metric": metric,
++                "limit": limit,
++                "ranking_url": ranking_page.url,
++                "products": products,
++            }
++            await context.storage_state(path=account_file)
++            return result
++        except Exception:
++            if debug:
++                log_dir = Path(BASE_DIR) / "logs"
++                log_dir.mkdir(parents=True, exist_ok=True)
++                await ranking_page.screenshot(path=str(log_dir / "douyin_groupbuy_ranking_failed.png"), full_page=True)
++                (log_dir / "douyin_groupbuy_ranking_raw_text.txt").write_text(
++                    await _body_text(ranking_page),
++                    encoding="utf-8",
++                )
++            raise
++        finally:
++            if should_close_browser:
++                await context.close()
++                await browser.close()
+diff --git a/tests/test_douyin_product_selector.py b/tests/test_douyin_product_selector.py
+new file mode 100644
+index 0000000..44fadda
+--- /dev/null
++++ b/tests/test_douyin_product_selector.py
+@@ -0,0 +1,50 @@
++import unittest
++
++from uploader.douyin_uploader.product_selector import (
++    build_public_content,
++    parse_product_candidates,
++)
++
++
++class DouyinProductSelectorTests(unittest.TestCase):
++    def test_parse_product_candidates_from_ranking_text(self):
++        text = """
++        商品榜单
++        昨天
++        商品成交券数
++        【慈溪城西】野人先生买一送一资格券【C】
++        ID：7655943912309278735
++        1元
++        商品成交券数
++        405
++        【慈溪城西】奶茶买一送一资格券【C】
++        ID：7655623663969994779
++        商品成交券数
++        276
++        """
++
++        products = parse_product_candidates(text, limit=2)
++
++        self.assertEqual(len(products), 2)
++        self.assertEqual(products[0]["product_id"], "7655943912309278735")
++        self.assertEqual(products[0]["metric"], "商品成交券数")
++        self.assertEqual(products[0]["metric_value"], "405")
++
++    def test_public_content_does_not_include_backend_id_or_metric(self):
++        product = {
++            "name": "【慈溪城西】野人先生买一送一资格券【C】",
++            "product_id": "7655943912309278735",
++            "metric_value": "405",
++            "detail": {"detail_text": "慈溪城西银泰百货 宁波市慈溪市宗汉街道"},
++        }
++
++        public = build_public_content(product)
++
++        self.assertNotIn("7655943912309278735", public["caption"])
++        self.assertNotIn("405", public["caption"])
++        self.assertIn("慈溪城西银泰百货", public["caption"])
++
++
++if __name__ == "__main__":
++    unittest.main()
++

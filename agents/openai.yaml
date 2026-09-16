@@ -1,0 +1,4 @@
+interface:
+  display_name: "抖音团购选品图文/视频发布自动化"
+  short_description: "选品、生成内容、挂团购位置并发布抖音图文或视频"
+  default_prompt: "Use $douyin-groupbuy-auto-publish to prepare and publish Douyin local-life image notes or videos with the correct domestic group-buy POI."

@@ -1,115 +1,220 @@
-<p align="center">
-  <img src="assets/readme/hero.svg" alt="抖音团购自动发布 CLI 主视觉：钉钉 AI 表 → 自动发布 → 链接回填">
-</p>
+# 抖音团购选品图文/视频发布自动化
 
-# 抖音团购自动发布 CLI
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![CLI](https://img.shields.io/badge/CLI-ready-111827)
+![Douyin](https://img.shields.io/badge/抖音-图文%20%2B%20视频-ef255c)
 
-**一条命令，把钉钉 AI 表里的团购视频发布到抖音，审核过审后自动把视频链接回填回 AI 表。**
+把抖音本地生活内容生产里最重复的操作串成一条命令链：
 
-单文件 Python 脚本（`douyin_publish.py`），无第三方依赖。由 AI Agent（千问办公 + opencli）实战校准并验证过完整发布链路——本项目即从一条真实发布的团购视频（2026-09-08，审核通过、链接回填成功）沉淀而来。
+**生意经选品 → 查询商品详情 → 生成公开推广工作包 → 原生生图 → 发布图文或视频 → 挂国内团购位置。**
 
-## 它解决什么问题
+![抖音团购选品图文视频发布自动化流程](assets/workflow.svg)
 
-本地生活/团购运营团队通常这样发视频：素材散落在协作表格里，人工逐条下载视频和封面、登录抖音创作者中心上传、填写标题简介、搜索门店位置、勾选 AI 声明、点发布，发完还要回头把表格状态改掉。一条视频 5-10 分钟，几十条就是半天。
+## 一眼看懂
 
-本 CLI 把这条链路自动化：**钉钉 AI 表是唯一的数据源**，脚本读表取素材、驱动你已登录的 Chrome 完成整个发布流程、等待平台审核、把视频 PC 链接回填到表里。整个过程发布前有人工确认门禁，失败即停不会重复发布。
+| 你提供什么 | 脚本自动处理什么 | 最后得到什么 |
+| --- | --- | --- |
+| 抖音账号、来客主体和选品条件 | 从生意经读取排名商品，再查询商品详情 | `selection.json` |
+| 选中的卡券和推广门店 | 生成标题、正文、图片提示词和发布元数据 | 一套公开推广工作包 |
+| 3-5 张生图海报 | 上传图片、选择音乐、挂国内 POI | 抖音团购图文 |
+| 一条已经生成的视频 | 填写标题简介、挂带货位置并发布 | 抖音团购视频 |
 
-## 工作流程
+## 脚本能做什么
 
-<p align="center">
-  <img src="assets/readme/workflow.svg" alt="六步流程：初始化、读表、素材校验、驱动发布、等待审核、回写验证">
-</p>
+### 1. 从生意经选卡券
 
-脚本实际执行的动作（全部经过实战校准）：
+- 支持“昨天”“近 7 日”等时间条件。
+- 支持按商品成交券数等指标取前 N 个商品。
+- 获取商品 ID 后回到抖音来客商品管理查询详情。
+- 内部数据只用于选品，不会自动写进公开推广文案。
 
-- **素材注入**：页面内 `DataTransfer` 注入视频/封面（抖音安全 SDK 拦截外部 fetch，脚本自动起本地 CORS 服务绕过）
-- **表单填写**：作品标题（30 字截断）、简介、竖版封面（自动跳过横封面）、位置-带货模式-国内门店 POI（名称精确匹配才选中）、自主声明「内容由AI生成」
-- **发布前核对**：标题/简介/位置/视频/封面/AI 声明逐项比对 AI 表数据，全部通过才允许点发布
-- **审核等待**：每 30 秒轮询作品状态，过审后经创作者中心 API 取 `item_id_plain` 拼出 PC 链接；审核未通过则停止并报警，不回写
-- **闭环回写**：`素材是否已用=已用`、`是否需要发布=否`、`视频链接=PC链接` 一次写入并回读验证
+### 2. 生成公开推广工作包
 
-## 快速开始
+脚本会把商品信息整理成：
 
-### 1. 安装依赖
-
-```bash
-# Python 3 自带即可，脚本无 pip 依赖
-
-# dws —— 钉钉工作台 CLI（读写 AI 表用）
-npm install -g dingtalk-workspace-cli
-dws    # 首次运行按提示授权你的钉钉账号
-
-# opencli —— 驱动已登录的 Chrome
-npm install -g @jackwener/opencli
-# 从 https://github.com/jackwener/OpenCLI/releases 下载 Browser Bridge 扩展 zip 并解压
-# Chrome 打开 chrome://extensions/ → 开发者模式 → 加载已解压的扩展程序 → 选中解压目录
-opencli doctor   # Daemon / Extension / Connectivity 三项 OK 即就绪
+```text
+groupbuy_work/
+├── title.txt
+├── caption.txt
+├── image_prompts.md
+├── publish_meta.json
+└── images/
 ```
 
-### 2. 初始化（首次使用）
+`image_prompts.md` 可直接交给 Codex 的 `imagegen` 技能，生成 3-5 张原生图片。脚本不会用 HTML 截图冒充生图。
+
+### 3. 发布团购图文
+
+- 上传 3-5 张图片。
+- 按内容选择推荐音乐，或使用指定音乐。
+- 填写标题、正文和话题。
+- 挂“位置 + 带货模式 + 国内”门店 POI。
+- 发布成功后进入作品管理页。
+
+### 4. 发布团购视频
+
+已经有 MP4 时，不需要重新走选品和生图。直接执行 `publish-video`：
 
 ```bash
-python3 douyin_publish.py --init
+./bin/douyin-groupbuy publish-video \
+  --account demo_douyin \
+  --file /path/to/video.mp4 \
+  --title "猛男被叫美女后，真香买了19.9逛吃卡" \
+  --desc "中大银泰服务台短剧，19.9逛吃卡真香反转。" \
+  --tags "杭州中大银泰,19块9逛吃卡,杭州团购,本地生活" \
+  --location "杭州中大银泰百货" \
+  --headed
 ```
 
-脚本会在你的钉钉组织中自动创建 Base「**抖音团购发布**」和数据表「**团购视频发布流水线**」（11 个字段含选项），并把字段配置存到 `~/.douyin_publisher.json`。
+这条命令会完成：上传视频、填写作品信息、选择国内门店位置、点击发布和检查成功状态。
 
-然后打开表格做两件事：
-1. 把「推广门店位置」的示例选项改成你的真实门店（可加多个）
-2. 把「发布账户」的示例选项改成你的抖音号名
+## 命令和产物
 
-### 3. 添加待发布记录
+![命令和产物关系](assets/usage-map.svg)
 
-在表格里添加记录，填齐这些字段后把「是否需要发布」设为**是**：
+常用入口只有四个：
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| 推广门店位置 | 多选 | 门店 POI，发布时搜索选中（名称需与抖音 POI 一致） |
-| 作品标题 | 文本 | 自动截断至 30 字 |
-| 作品简介 | 文本 | 支持话题标签 `#xxx` |
-| 视频输出 | 附件 | 待发布的视频文件 |
-| 视频封面 | 附件 | 竖版封面图 |
-| 是否需要发布 | 单选 | 设为「是」才会被脚本处理 |
-| 素材是否已用 / 视频链接 | 单选 / 链接 | 脚本发布成功后自动回写，无需手填 |
+| 命令 | 用途 |
+| --- | --- |
+| `select` | 从生意经选品并查询商品详情 |
+| `brief` | 生成公开推广工作包 |
+| `publish` | 发布团购图文并选择音乐 |
+| `publish-video` | 发布团购视频并挂国内位置 |
 
-### 4. 确保 Chrome 已登录抖音创作者中心
+## 团购位置不会只“输入”不“选择”
 
-打开 [creator.douyin.com](https://creator.douyin.com) 并登录（发布用的抖音号要与表格「发布账户」一致）。Chrome 保持运行即可。
+位置发布按固定顺序执行：
 
-### 5. 发布
+1. 添加标签选择“位置”。
+2. 进入“带货模式”。
+3. 切换到“国内”。
+4. 输入完整门店名。
+5. 等待候选加载。
+6. 选择匹配的商场级候选。
+
+![团购位置选择示意](assets/poi-location.svg)
+
+候选项会按名称和门店类型评分。例如目标是“合肥滨湖银泰百货”时，商场级位置优先于“植村秀（滨湖银泰城店）”这类店铺级位置。
+
+## 一次发布只启动一个持久在线浏览器
+
+旧流程会在正式上传前最多启动 3 次 Chrome 检查 Cookie，真正上传时再启动一次。现在登录校验、上传、位置选择和发布共用同一个浏览器会话。
+
+![单浏览器发布会话](assets/single-browser.svg)
+
+CLI 会给每个账号使用独立 Profile：
+
+```text
+$SOCIAL_AUTO_UPLOAD_HOME/browser_profiles/douyin_<账号名>/
+```
+
+新账号或新 Profile 第一次可能需要扫码；扫码完成后，当前 `publish-video` 命令会继续上传、挂位置并发布。后续同账号通常直接复用登录态，不需要每条视频都先跑 `douyin check`。如果平台触发风控、短信或验证码，保留 `--headed` 在同一个窗口里处理。
+
+2026-09-15 已用“六安银泰百货”视频发布链路做过本机验收：扫码登录后，命令继续完成上传、填写、选择位置和发布。
+
+## 安装
 
 ```bash
-python3 douyin_publish.py                # 取下一条待发布记录，发布前交互确认
-python3 douyin_publish.py --record-id XX # 指定记录
-python3 douyin_publish.py --no-publish   # 只填表不点发布，先人工检查
-python3 douyin_publish.py --review-timeout 900   # 审核等待上限调到 15 分钟
+git clone https://github.com/784697524-ux/douyin-groupbuy-publisher.git
+cd douyin-groupbuy-publisher
+./install.sh
+./scripts/apply_douyin_groupbuy_patch.sh
 ```
 
-## 参数一览
+默认使用本机运行环境：
 
-| 参数 | 说明 |
-|---|---|
-| `--init` | 仅初始化：创建钉钉 AI 表 + 生成配置后退出 |
-| `--record-id ID` | 指定要发布的记录（默认取第一条完整待发布记录） |
-| `--yes` | 跳过发布前确认（慎用，会直接真实发布） |
-| `--no-publish` | 填完表单停在发布前（校准/演示用） |
-| `--review-timeout SEC` | 审核等待上限秒数（默认 600） |
+```text
+$HOME/.openclaw/workspace/social-auto-upload
+```
 
-## 安全设计
+应用脚本会安装团购位置、视频位置、单浏览器发布和持久登录 Profile 四组补丁。重复执行是安全的；已经存在的补丁会被识别并跳过。
 
-- **发布门禁**：默认每条视频发布前需终端输入 `y` 确认；`--no-publish` 可全程演练不发布
-- **失败即停**：上传失败、触发安全验证、审核未通过、确认超时——任何一步失败都不回写、不自动重试，避免重复发布
-- **发布确认**：点击发布后以「跳转作品管理页」为成功标志，超时则明确提示人工核对、勿重跑
-- **字节校验**：视频/封面下载后校验字节数与文件头，防止损坏素材发出
-- **数据只进你自己的组织**：AI 表创建在你授权的钉钉组织内，配置存本地 `~/.douyin_publisher.json`
+运行环境不在默认目录时：
 
-## 已知边界
+```bash
+export SOCIAL_AUTO_UPLOAD_HOME="/path/to/social-auto-upload"
+./scripts/apply_douyin_groupbuy_patch.sh
+```
 
-- 单次处理 1 条记录（防止批量误发）；发多条就多跑几次，每条都会重新确认
-- 发布账号 = Chrome 当前登录的抖音号；换号需先在 Chrome 切换登录
-- 触发抖音安全验证（短信/滑块）时脚本停止，需人工处理后重跑该记录
-- 「推广门店位置」依赖抖音 POI 搜索，门店名与抖音 POI 名称需一致（如「xx银泰百货」）
+## 从选品到图文发布
 
-## License
+### 第一步：选取昨日卡券
 
-[MIT](LICENSE)
+```bash
+python scripts/douyin_groupbuy_pipeline.py select \
+  --account demo_douyin \
+  --groupid 1748531528342532 \
+  --date "昨天" \
+  --metric "商品成交券数" \
+  --limit 3 \
+  --output /path/to/selection.json \
+  --headed
+```
+
+如果需要复用已经登录的 Chrome：
+
+```bash
+python scripts/douyin_groupbuy_pipeline.py select \
+  --account demo_douyin \
+  --groupid 1748531528342532 \
+  --date "昨天" \
+  --metric "商品成交券数" \
+  --limit 3 \
+  --output /path/to/selection.json \
+  --cdp-url http://127.0.0.1:9222 \
+  --headed
+```
+
+### 第二步：生成推广工作包
+
+```bash
+python scripts/douyin_groupbuy_pipeline.py brief \
+  --selection /path/to/selection.json \
+  --product-index 1 \
+  --output-dir /path/to/groupbuy_work \
+  --location "合肥滨湖银泰百货"
+```
+
+读取 `/path/to/groupbuy_work/image_prompts.md`，调用 Codex 原生生图，并将图片放入：
+
+```text
+/path/to/groupbuy_work/images/
+```
+
+### 第三步：发布图文
+
+```bash
+python scripts/douyin_groupbuy_pipeline.py publish \
+  --account demo_douyin \
+  --work-dir /path/to/groupbuy_work \
+  --location "合肥滨湖银泰百货" \
+  --bgm auto \
+  --headed
+```
+
+## 成功标准
+
+任务只有满足下面条件才算完成：
+
+- 选品：`selection.json` 包含排名商品和商品详情。
+- 内容：工作目录包含标题、正文、图片提示词和发布元数据。
+- 位置：日志确认选中了目标商场级 POI，而不是只在输入框里写了名称。
+- 发布：页面进入作品管理页，或出现平台明确的发布成功状态。
+
+短信验证码、图形验证码、位置候选错误、只完成上传，都不能算发布成功。
+
+## 公开内容边界
+
+仓库和公开文案不会包含：
+
+- 抖音 Cookie、二维码、账号密码和浏览器 Profile。
+- 商品 ID、后台销量、成交金额和内部排名。
+- 发布日志和带个人信息的后台截图。
+
+对外内容只使用消费者能够看到的商品权益、售价、使用日期、适用门店和退款规则。
+
+## 更多说明
+
+- [完整使用说明](references/usage.md)
+- [音乐和位置选择器说明](references/automa-selectors.md)
+- [公开推广文案规则](references/public-copy-rules.md)
