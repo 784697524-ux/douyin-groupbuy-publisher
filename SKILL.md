@@ -1,6 +1,6 @@
 ---
 name: douyin-groupbuy-auto-publish
-description: 抖音团购选品图文/视频发布自动化。Automate Douyin local-life group-buy promotion from product selection to image-note or video publishing with a domestic POI. Use when Codex needs to publish Douyin 图文或视频并挂带货模式国内位置。
+description: 抖音团购选品、卡券详情和图文/视频发布 CLI。查询昨日销售金额前十、按商品 ID 读取来客详情、生成推广简报并发布到抖音国内带货位置。
 ---
 
 # 抖音团购选品图文/视频发布自动化
@@ -40,6 +40,29 @@ Before first use, apply the Douyin group-buy patch:
 
 The patch also removes the separate cookie-preflight browsers. A publish command now opens one persistent Chrome profile, validates login inside that same session, and continues publishing after the operator scans or completes verification.
 
+## Verified Selection CLI
+
+Selection uses OpenCLI's Chrome extension to reuse the logged-in Laike/Shengyijing browser. It does not need a creator account name or CDP port. Run `opencli doctor` first; proceed when the daemon and extension are connected. Keep the same `--session` throughout a query. The CLI activates and verifies its owned tab before page actions; an inactive bound tab that forbids selection fails with a request to use a fresh owned session. Read [references/selection-cli.md](references/selection-cli.md) for the recorded flow, supported scope, output, and troubleshooting.
+
+```bash
+./bin/douyin-groupbuy select \
+  --groupid <laike_groupid> --date 昨天 \
+  --metric 商品成交金额 --limit 10 --detail-index 1 \
+  --output /path/to/selection.json
+```
+
+This checks the Asia/Shanghai yesterday period, exact metric column, active descending sort, loading completion, actual numeric order, and the selected coupon's detail identity. It reads ten ranking rows and only one detail. `--detail-index 0` saves ranking only. A saved ranking with `details_status=pending` is not a completed detail query.
+
+Read another coupon without rerunning the ranking:
+
+```bash
+./bin/douyin-groupbuy detail \
+  --selection /path/to/selection.json --product-index 3 \
+  --output /path/to/detail.json
+```
+
+The OpenCLI selection currently supports `昨天`, amount or coupon-count ranking, and 1-10 rows on the first page. A blank detail gets one fresh-tab recovery using its verified URL, then readable fields must pass again. Login, wrong product, persistent blank detail, or insufficient rows fails; retain the saved ranking and report the failed stage. Use `--browser sau --account <account> --cdp-url <url>` only for the legacy selector, whose loose text parser is not the verified amount-ranking path.
+
 ## Main Workflow
 
 For video publishing, run `publish-video` directly. It uses the same account browser profile for login and upload. If Douyin shows a login page, the command waits in that same browser session and continues after the operator scans or completes verification. The profile lives under:
@@ -52,29 +75,6 @@ First use of a new account/profile may require QR login. Subsequent publishes sh
 
 ```bash
 ./bin/sau douyin check --account <douyin_account>
-```
-
-Select products:
-
-```bash
-python scripts/douyin_groupbuy_pipeline.py select \
-  --account <douyin_account> \
-  --groupid <laike_groupid> \
-  --date "昨天" \
-  --metric "商品成交券数" \
-  --limit 3 \
-  --output /path/to/selection.json \
-  --headed
-```
-
-If the standalone browser lands on the 生意经 login page, reuse an already logged-in Chrome session:
-
-```bash
-python scripts/douyin_groupbuy_pipeline.py select \
-  --account <douyin_account> \
-  --output /path/to/selection.json \
-  --cdp-url http://127.0.0.1:9222 \
-  --headed
 ```
 
 Create the public work package:
@@ -121,15 +121,14 @@ Do not run `douyin check` before every publish. Use it only for explicit account
 
 ## One-Step Selection And Brief
 
-Use `run` to select products and create the work package in one command. It does not generate native images by itself.
+Use `run` to select ten products, verify the chosen detail, and create a work package in one command. It does not generate native images by itself; use `imagegen` in Codex. To publish prepared assets in the same command, supply `--account`, `--images` (or `--image-dir`), and `--publish`. Add `--dry-run` to validate assets and print the upload command without submitting. Native image generation remains a separate agent step; do not report it as a shell-only generation workflow.
 
 ```bash
 python scripts/douyin_groupbuy_pipeline.py run \
-  --account <douyin_account> \
   --groupid <laike_groupid> \
   --date "昨天" \
-  --metric "商品成交券数" \
-  --limit 3 \
+  --metric "商品成交金额" \
+  --limit 10 \
   --output /path/to/selection.json \
   --product-index 1 \
   --output-dir /path/to/groupbuy_work \
@@ -139,7 +138,7 @@ python scripts/douyin_groupbuy_pipeline.py run \
 
 ## POI Rules
 
-The publish path must use:
+A domestic POI is a location tag. It does not prove the selected coupon is attached as a purchasable product; the existing note publisher attaches the POI. The publish path must use:
 
 1. `添加标签` = `位置`
 2. mode = `带货模式`
@@ -154,7 +153,7 @@ The bundled patch scores candidates so mall-level POIs like `合肥滨湖银泰�
 
 ## Success Criteria
 
-Selection succeeds only when the JSON contains ranked products and Laike detail facts.
+Selection succeeds only when the JSON contains the verified date/metric/order and requested rows; a requested detail additionally requires `details_status=verified`, matching product ID in the detail URL, and readable product fields, completed loading, and a displayed store count matching the product's store references. Report ranking, detail, assets, and publication separately. `timings` records measured seconds; do not infer speed from fixed waits or old runs.
 
 Brief generation succeeds only when the work directory contains:
 
@@ -168,6 +167,7 @@ Publishing succeeds only when the CLI exits successfully and Douyin reports a su
 
 ## References
 
+- `references/selection-cli.md`: verified ranking/detail CLI and Automa migration
 - `references/usage.md`: user-facing install and CLI examples
 - `references/automa-selectors.md`: proven music and location selectors
 - `references/public-copy-rules.md`: public promotion copy rules

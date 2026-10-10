@@ -22,23 +22,25 @@
 
 ![命令和产物关系](../assets/usage-map.svg)
 
-## 2. 选品
+## 2. 昨日金额前十与一张详情
 
 ```bash
-python scripts/douyin_groupbuy_pipeline.py select \
-  --account <douyin_account> \
-  --groupid <laike_groupid> \
-  --date "昨天" \
-  --metric "商品成交券数" \
-  --limit 3 \
-  --output /path/to/selection.json \
-  --headed
+opencli doctor
+./bin/douyin-groupbuy select --groupid <laike_groupid> \
+  --date 昨天 --metric 商品成交金额 --limit 10 --detail-index 1 \
+  --output /path/to/selection.json
 ```
 
-常用指标：
+无需创作者账号或CDP端口。复用Chrome登录态，验证单日周期、金额列、降序和商品身份，只查询所选一张详情。详细说明与录制迁移见 [selection-cli.md](selection-cli.md)。
 
-- `商品成交券数`
-- `商品成交金额`
+当前支持“昨天”、商品成交金额/商品成交券数和前 1-10 条。需要查看榜单中的另一张卡券时：
+
+```bash
+./bin/douyin-groupbuy detail --selection /path/to/selection.json \
+  --product-index 3 --output /path/to/detail.json
+```
+
+`--cdp-url` 仅用于显式选择 `--browser sau --account demo_douyin` 的旧版选品器，默认 OpenCLI 查询不使用它。
 
 ## 3. 生成图文 brief
 
@@ -58,6 +60,17 @@ python scripts/douyin_groupbuy_pipeline.py brief \
 - `publish_meta.json`
 - `images/`
 
+也可用 `run` 将选品和生成工作包串成一步：
+
+```bash
+./bin/douyin-groupbuy run --groupid <laike_groupid> \
+  --date 昨天 --metric 商品成交金额 --limit 10 --product-index 1 \
+  --output /path/to/selection.json --output-dir /path/to/groupbuy_work \
+  --location "<完整POI名称>"
+```
+
+`run` 不会自动生成图片；已有真实素材时，可增加 `--images <图片...> --account demo_douyin --publish` 接续发布，用 `--dry-run` 校验而不提交。
+
 ## 4. 生图
 
 用 Codex 的 `imagegen` skill 读取 `image_prompts.md`。每个商品建议生成 3-5 张竖版图文海报，放入 `images/`。
@@ -66,7 +79,7 @@ python scripts/douyin_groupbuy_pipeline.py brief \
 
 ```bash
 python scripts/douyin_groupbuy_pipeline.py publish \
-  --account <douyin_account> \
+  --account demo_douyin \
   --work-dir /path/to/groupbuy_work \
   --location "<完整POI名称>" \
   --bgm auto \
@@ -81,7 +94,7 @@ python scripts/douyin_groupbuy_pipeline.py publish \
 
 ```bash
 ./bin/douyin-groupbuy publish-video \
-  --account <douyin_account> \
+  --account demo_douyin \
   --file /path/to/video.mp4 \
   --title "<作品标题>" \
   --desc "<作品简介>" \

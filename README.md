@@ -14,7 +14,7 @@
 
 | 你提供什么 | 脚本自动处理什么 | 最后得到什么 |
 | --- | --- | --- |
-| 抖音账号、来客主体和选品条件 | 从生意经读取排名商品，再查询商品详情 | `selection.json` |
+| 来客主体、已登录 Chrome 和选品条件 | 从生意经读取排名商品，再查询所选一张商品详情 | `selection.json` |
 | 选中的卡券和推广门店 | 生成标题、正文、图片提示词和发布元数据 | 一套公开推广工作包 |
 | 3-5 张生图海报 | 上传图片、选择音乐、挂国内 POI | 抖音团购图文 |
 | 一条已经生成的视频 | 填写标题简介、挂带货位置并发布 | 抖音团购视频 |
@@ -23,9 +23,9 @@
 
 ### 1. 从生意经选卡券
 
-- 支持“昨天”“近 7 日”等时间条件。
-- 支持按商品成交券数等指标取前 N 个商品。
-- 获取商品 ID 后回到抖音来客商品管理查询详情。
+- 当前支持“昨天”单日，按商品成交金额或商品成交券数取前 1-10 个商品。
+- 默认使用 OpenCLI 复用已登录 Chrome，并验证日期、排序指标和降序状态。
+- 获取商品 ID 后回到抖音来客商品管理，查询所选一张卡券的详情。
 - 内部数据只用于选品，不会自动写进公开推广文案。
 
 ### 2. 生成公开推广工作包
@@ -72,14 +72,16 @@ groupbuy_work/
 
 ![命令和产物关系](assets/usage-map.svg)
 
-常用入口只有四个：
+常用入口有六个：
 
 | 命令 | 用途 |
 | --- | --- |
-| `select` | 从生意经选品并查询商品详情 |
+| `select` | 从生意经选品并查询所选一张商品详情 |
+| `detail` | 按商品 ID 或已保存榜单查询一张卡券详情 |
 | `brief` | 生成公开推广工作包 |
 | `publish` | 发布团购图文并选择音乐 |
 | `publish-video` | 发布团购视频并挂国内位置 |
+| `run` | 选品、生成工作包，并可接续准备好的素材发布 |
 
 ## 团购位置不会只“输入”不“选择”
 
@@ -141,22 +143,22 @@ export SOCIAL_AUTO_UPLOAD_HOME="/path/to/social-auto-upload"
 ### 第一步：选取昨日卡券
 
 ```bash
-python scripts/douyin_groupbuy_pipeline.py select \
-  --account demo_douyin \
-  --groupid 1748531528342532 \
+./bin/douyin-groupbuy select \
+  --groupid <laike_groupid> \
   --date "昨天" \
-  --metric "商品成交券数" \
-  --limit 3 \
-  --output /path/to/selection.json \
-  --headed
+  --metric "商品成交金额" \
+  --limit 10 \
+  --detail-index 1 \
+  --output /path/to/selection.json
 ```
 
-如果需要复用已经登录的 Chrome：
+默认 OpenCLI 已复用登录的 Chrome，无需创作者账号或 CDP 端口。只有显式使用旧版 `--browser sau` 选品器时才使用 `--cdp-url`；该路径不是已核验的成交金额排名流程：
 
 ```bash
 python scripts/douyin_groupbuy_pipeline.py select \
+  --browser sau \
   --account demo_douyin \
-  --groupid 1748531528342532 \
+  --groupid <laike_groupid> \
   --date "昨天" \
   --metric "商品成交券数" \
   --limit 3 \
@@ -218,3 +220,15 @@ python scripts/douyin_groupbuy_pipeline.py publish \
 - [完整使用说明](references/usage.md)
 - [音乐和位置选择器说明](references/automa-selectors.md)
 - [公开推广文案规则](references/public-copy-rules.md)
+
+## 昨日金额前十与动态卡券详情
+
+```bash
+opencli doctor
+./bin/douyin-groupbuy select --groupid <laike_groupid> --date 昨天 \
+  --metric 商品成交金额 --limit 10 --detail-index 1 --output /path/to/selection.json
+./bin/douyin-groupbuy detail --selection /path/to/selection.json \
+  --product-index 3 --output /path/to/detail.json
+```
+
+使用OpenCLI复用登录态，核验日期、精确金额列、页面降序和所选商品身份，只查询所需的一张详情。保留原发布CLI，可用`--dry-run`验证准备好的素材与上传命令；原生生图仍由Codex调用imagegen。参见 [选品详情CLI](references/selection-cli.md)。

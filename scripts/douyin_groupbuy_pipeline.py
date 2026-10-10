@@ -5,7 +5,13 @@ import argparse
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from groupbuy_browser import Browser, select_rank
+from laike_detail import read_detail, build_product_copy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +49,28 @@ def collect_images(image_dir: Path | None, images: list[str]) -> list[Path]:
 def select_products(args: argparse.Namespace) -> Path:
     output = args.output.expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
+    if args.browser == "opencli":
+        browser = Browser(args.session)
+        selection = select_rank(browser, args.groupid, args.date, args.metric, args.limit)
+        selection["details_status"] = "not_requested" if args.detail_index == 0 else "pending"
+        write_text(output, json.dumps(selection, ensure_ascii=False, indent=2))
+        if args.detail_index:
+            if not 1 <= args.detail_index <= len(selection["products"]):
+                raise SystemExit("--detail-index must be between 0 and --limit")
+            product = selection["products"][args.detail_index - 1]
+            started = time.monotonic()
+            product["laike_detail"] = read_detail(browser, args.groupid, product["product_id"])
+            product.update(build_product_copy(product, product["laike_detail"]))
+            selection["timings"]["detail_seconds"] = round(time.monotonic() - started, 3)
+            selection["timings"]["total_seconds"] += selection["timings"]["detail_seconds"]
+            selection["details_status"] = "verified"
+            selection["detail_index"] = args.detail_index
+            write_text(output, json.dumps(selection, ensure_ascii=False, indent=2))
+        print(json.dumps({"output": str(output), "products": len(selection["products"]),
+                          "details_status": selection["details_status"], "timings": selection["timings"]}, ensure_ascii=False))
+        return output
+    if not args.account:
+        raise SystemExit("--account is required for --browser sau")
     cmd = [
         str(SAU),
         "douyin",
@@ -68,12 +96,43 @@ def select_products(args: argparse.Namespace) -> Path:
     return output
 
 
+def query_detail(args: argparse.Namespace) -> Path:
+    if args.selection:
+        selection = load_json(args.selection.expanduser())
+        if not 1 <= args.product_index <= len(selection.get("products", [])):
+            raise SystemExit("--product-index is outside the selected products")
+        product = selection["products"][args.product_index - 1]
+        product_id = product.get("product_id") or product["id"]
+        groupid = selection.get("groupid") or args.groupid
+    else:
+        product_id, groupid = args.product_id, args.groupid
+    started = time.monotonic()
+    detail = read_detail(Browser(args.session), groupid, product_id)
+    detail["elapsed_seconds"] = round(time.monotonic() - started, 3)
+    if args.selection:
+        product["laike_detail"] = detail
+        product.update(build_product_copy(product, detail))
+        selection["details_status"] = "verified"
+        selection["detail_index"] = args.product_index
+        write_text(args.selection.expanduser(), json.dumps(selection, ensure_ascii=False, indent=2))
+    write_text(args.output.expanduser(), json.dumps(detail, ensure_ascii=False, indent=2))
+    print(json.dumps({"output": str(args.output), "verified": detail["verified"],
+                      "elapsed_seconds": detail["elapsed_seconds"]}, ensure_ascii=False))
+    return args.output
+
+
 def build_brief(args: argparse.Namespace) -> Path:
     selection = load_json(args.selection.expanduser())
     products = selection.get("products") or []
     if not products:
         raise SystemExit(f"selection has no products: {args.selection}")
+    if not 1 <= args.product_index <= len(products):
+        raise SystemExit("--product-index is outside the selected products")
     product = products[args.product_index - 1]
+    detail = product.get("laike_detail")
+    if not detail or not detail.get("verified"):
+        raise SystemExit("selected product has no verified detail; select it with --detail-index")
+    product.update(build_product_copy(product, detail, args.location))
     public = product.get("public") or {}
     prompts = product.get("image_prompts") or []
     out_dir = args.output_dir.expanduser()
@@ -110,6 +169,8 @@ def build_brief(args: argparse.Namespace) -> Path:
 
 
 def publish_note(args: argparse.Namespace) -> None:
+    if not args.account:
+        raise SystemExit("--account is required for publishing")
     work_dir = args.work_dir.expanduser()
     meta_path = work_dir / "publish_meta.json"
     meta = load_json(meta_path) if meta_path.exists() else {}
@@ -124,6 +185,11 @@ def publish_note(args: argparse.Namespace) -> None:
 
     title = args.title or (work_dir / "title.txt").read_text(encoding="utf-8").strip() or meta.get("title", "")
     note_file = args.notef or work_dir / "caption.txt"
+    if not title.strip():
+        raise SystemExit("missing publish title")
+    note_file = note_file.expanduser()
+    if not note_file.is_file() or not note_file.read_text(encoding="utf-8").strip():
+        raise SystemExit(f"missing or empty caption: {note_file}")
     location = args.location or meta.get("location", "")
     if not location:
         raise SystemExit("missing --location and publish_meta.json has no location")
@@ -146,6 +212,9 @@ def publish_note(args: argparse.Namespace) -> None:
         args.bgm,
     ]
     cmd.append("--headless" if args.headless else "--headed")
+    if getattr(args, "dry_run", False):
+        print(json.dumps({"status": "prepared_not_published", "command": cmd}, ensure_ascii=False))
+        return
     run(cmd)
 
 
@@ -181,10 +250,15 @@ def publish_video(args: argparse.Namespace) -> None:
     if args.debug:
         cmd.append("--debug")
     cmd.append("--headless" if args.headless else "--headed")
+    if getattr(args, "dry_run", False):
+        print(json.dumps({"status": "prepared_not_published", "command": cmd}, ensure_ascii=False))
+        return
     run(cmd)
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
+    if args.detail_index is None:
+        args.detail_index = args.product_index
     selection = select_products(args)
     brief_args = argparse.Namespace(
         selection=selection,
@@ -205,18 +279,22 @@ def run_pipeline(args: argparse.Namespace) -> None:
             location=args.location,
             bgm=args.bgm,
             headless=args.headless,
+            dry_run=args.dry_run,
         )
         publish_note(publish_args)
 
 
 def add_common_selection_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--account", required=True)
+    parser.add_argument("--account", default="")
     parser.add_argument("--groupid", default=DEFAULT_GROUP_ID)
     parser.add_argument("--date", default="昨天")
-    parser.add_argument("--metric", default="商品成交券数")
-    parser.add_argument("--limit", type=int, default=3)
+    parser.add_argument("--metric", default="商品成交金额")
+    parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cdp-url", default="")
+    parser.add_argument("--browser", choices=["opencli", "sau"], default="opencli")
+    parser.add_argument("--session", default="douyin-groupbuy")
+    parser.add_argument("--detail-index", type=int, default=1, help="Read only this ranked product; 0 = ranking only")
     runtime = parser.add_mutually_exclusive_group()
     runtime.add_argument("--headed", dest="headless", action="store_false")
     runtime.add_argument("--headless", dest="headless", action="store_true")
@@ -229,6 +307,15 @@ def parse_args() -> argparse.Namespace:
 
     select_parser = commands.add_parser("select", help="Fetch ranked coupons and Laike detail JSON")
     add_common_selection_args(select_parser)
+
+    detail_parser = commands.add_parser("detail", help="Read one Laike coupon by product ID or saved ranking")
+    detail_source = detail_parser.add_mutually_exclusive_group(required=True)
+    detail_source.add_argument("--product-id")
+    detail_source.add_argument("--selection", type=Path)
+    detail_parser.add_argument("--product-index", type=int, default=1)
+    detail_parser.add_argument("--groupid", default=DEFAULT_GROUP_ID)
+    detail_parser.add_argument("--session", default="douyin-groupbuy")
+    detail_parser.add_argument("--output", type=Path, required=True)
 
     brief_parser = commands.add_parser("brief", help="Create public copy and native-image prompts from selection JSON")
     brief_parser.add_argument("--selection", type=Path, required=True)
@@ -246,6 +333,7 @@ def parse_args() -> argparse.Namespace:
     publish_parser.add_argument("--notef", type=Path)
     publish_parser.add_argument("--location", default="")
     publish_parser.add_argument("--bgm", default="auto")
+    publish_parser.add_argument("--dry-run", action="store_true", help="Validate assets and print publish command without submitting")
     publish_runtime = publish_parser.add_mutually_exclusive_group()
     publish_runtime.add_argument("--headed", dest="headless", action="store_false")
     publish_runtime.add_argument("--headless", dest="headless", action="store_true")
@@ -263,6 +351,7 @@ def parse_args() -> argparse.Namespace:
     video_parser.add_argument("--location", required=True)
     video_parser.add_argument("--thumbnail", type=Path)
     video_parser.add_argument("--debug", action="store_true")
+    video_parser.add_argument("--dry-run", action="store_true")
     video_runtime = video_parser.add_mutually_exclusive_group()
     video_runtime.add_argument("--headed", dest="headless", action="store_false")
     video_runtime.add_argument("--headless", dest="headless", action="store_true")
@@ -278,6 +367,8 @@ def parse_args() -> argparse.Namespace:
     run_parser.add_argument("--images", nargs="*", default=[])
     run_parser.add_argument("--bgm", default="auto")
     run_parser.add_argument("--publish", action="store_true")
+    run_parser.add_argument("--dry-run", action="store_true")
+    run_parser.set_defaults(detail_index=None)
     return parser.parse_args()
 
 
@@ -285,6 +376,8 @@ def main() -> int:
     args = parse_args()
     if args.command == "select":
         select_products(args)
+    elif args.command == "detail":
+        query_detail(args)
     elif args.command == "brief":
         build_brief(args)
     elif args.command == "publish":
@@ -297,4 +390,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (RuntimeError, TimeoutError, ValueError) as error:
+        print(json.dumps({"status": "failed", "error": str(error)}, ensure_ascii=False), file=sys.stderr)
+        raise SystemExit(1)
