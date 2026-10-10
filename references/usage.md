@@ -106,3 +106,14 @@ python scripts/douyin_groupbuy_pipeline.py publish \
 正常发布直接运行上面的命令即可，不要在每次发布前额外执行 `douyin check`。新账号第一次可能需要扫码；扫码完成后，当前发布命令会继续上传、挂位置并发布。后续同账号通常复用本地 Profile 登录态，除非抖音触发风控或短信验证码。
 
 CLI 会完成：上传视频、选择位置、进入国内位置、输入门店、等待候选、选择匹配门店并发布。只有日志出现目标门店且平台返回发布成功，才算完成。
+
+## 7. 批量视频发布和断点续跑
+
+```bash
+./bin/douyin-groupbuy publish-batch \
+  --manifest /path/to/batch.json --state-dir /path/to/batch-state \
+  --account demo_douyin --expected-account demo_douyin_id \
+  --dry-run
+```
+
+先校验素材和已有状态；获准发布后去掉 `--dry-run`。同一批次复用一个 Chrome 会话，账号必须与真实抖音号精确匹配；每条应用竖封面、填写简短文案、设置 AI 声明并选择 POI。每次提交只点击一次发布按钮，匹配新作品回执后才标记 `submitted`。重跑跳过已确认作品，结果不明时停止。清单字段和状态处理见 [batch-publish.md](batch-publish.md)。

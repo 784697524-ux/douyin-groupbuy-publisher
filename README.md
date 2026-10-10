@@ -18,6 +18,7 @@
 | 选中的卡券和推广门店 | 生成标题、正文、图片提示词和发布元数据 | 一套公开推广工作包 |
 | 3-5 张生图海报 | 上传图片、选择音乐、挂国内 POI | 抖音团购图文 |
 | 一条已经生成的视频 | 填写标题简介、挂带货位置并发布 | 抖音团购视频 |
+| 一批确认过的视频和竖封面 | 单个 Chrome 会话逐条发布、核对账号和新作品回执、保存进度 | 可续跑的提交状态和回执 |
 
 ## 脚本能做什么
 
@@ -68,11 +69,26 @@ groupbuy_work/
 
 这条命令会完成：上传视频、填写作品信息、选择国内门店位置、点击发布和检查成功状态。
 
+### 5. 一条命令批量发布与续跑
+
+把已确认的视频、竖封面和简短文案写入 `batch.json`，先校验：
+
+```bash
+./bin/douyin-groupbuy publish-batch \
+  --manifest /path/to/batch.json --state-dir /path/to/batch-state \
+  --account demo_douyin --expected-account demo_douyin_id \
+  --dry-run
+```
+
+获准发布后去掉 `--dry-run`。CLI 等待创作者主页显示真实抖音号，精确核对账号，再复用单个 Chrome 会话逐条上传；每条作品检查竖封面、标题、AI 声明，并选择团购位置。它上传清单中的文件，不加工原片或替换配音。
+
+同一条命令再次运行会跳过已有匹配回执的作品。发布按钮只点击一次；提交结果不明时保留状态并停止，避免重复发布。回执确认提交，与平台审核、公开可见和音频播放验收分别记录。清单格式、运行环境和恢复规则见 [批量发布 CLI](references/batch-publish.md)。
+
 ## 命令和产物
 
 ![命令和产物关系](assets/usage-map.svg)
 
-常用入口有六个：
+常用入口有七个：
 
 | 命令 | 用途 |
 | --- | --- |
@@ -81,6 +97,7 @@ groupbuy_work/
 | `brief` | 生成公开推广工作包 |
 | `publish` | 发布团购图文并选择音乐 |
 | `publish-video` | 发布团购视频并挂国内位置 |
+| `publish-batch` | 单浏览器批量视频发布、回执确认与断点续跑 |
 | `run` | 选品、生成工作包，并可接续准备好的素材发布 |
 
 ## 团购位置不会只“输入”不“选择”
@@ -201,7 +218,8 @@ python scripts/douyin_groupbuy_pipeline.py publish \
 - 选品：`selection.json` 包含排名商品和商品详情。
 - 内容：工作目录包含标题、正文、图片提示词和发布元数据。
 - 位置：日志确认选中了目标商场级 POI，而不是只在输入框里写了名称。
-- 发布：页面进入作品管理页，或出现平台明确的发布成功状态。
+- 批量提交：保存的新作品回执匹配标题、简介前缀、真实账号和提交时间；进入作品管理页本身不算回执。
+- 作品上线与播放：另外核验审核结果、公开可见状态和平台音视频。
 
 短信验证码、图形验证码、位置候选错误、只完成上传，都不能算发布成功。
 
@@ -218,6 +236,7 @@ python scripts/douyin_groupbuy_pipeline.py publish \
 ## 更多说明
 
 - [完整使用说明](references/usage.md)
+- [批量发布与续跑](references/batch-publish.md)
 - [音乐和位置选择器说明](references/automa-selectors.md)
 - [公开推广文案规则](references/public-copy-rules.md)
 

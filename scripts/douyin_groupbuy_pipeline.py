@@ -256,6 +256,19 @@ def publish_video(args: argparse.Namespace) -> None:
     run(cmd)
 
 
+def publish_batch(args: argparse.Namespace) -> None:
+    python = Path(sys.executable) if args.dry_run else RUNTIME / ".venv/bin/python"
+    cmd = [str(python), str(ROOT / "scripts/publish_douyin_groupbuy_batch.py"),
+           "--manifest", str(args.manifest.expanduser().resolve()),
+           "--state-dir", str(args.state_dir.expanduser().resolve()),
+           "--account", args.account, "--expected-account", args.expected_account]
+    if args.dry_run:
+        cmd.append("--dry-run")
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+
+
 def run_pipeline(args: argparse.Namespace) -> None:
     if args.detail_index is None:
         args.detail_index = args.product_index
@@ -357,6 +370,13 @@ def parse_args() -> argparse.Namespace:
     video_runtime.add_argument("--headless", dest="headless", action="store_true")
     video_parser.set_defaults(headless=False)
 
+    batch_parser = commands.add_parser("publish-batch", help="Publish prepared videos in one Chrome session with resumable receipts")
+    batch_parser.add_argument("--manifest", type=Path, required=True)
+    batch_parser.add_argument("--state-dir", type=Path, required=True)
+    batch_parser.add_argument("--account", required=True, help="Local Chrome profile/cookie alias")
+    batch_parser.add_argument("--expected-account", required=True, help="Exact Douyin ID to verify before uploading")
+    batch_parser.add_argument("--dry-run", action="store_true", help="Validate assets and resume state without opening Chrome or submitting")
+
     run_parser = commands.add_parser("run", help="Select products, create brief, and optionally publish")
     add_common_selection_args(run_parser)
     run_parser.add_argument("--product-index", type=int, default=1)
@@ -384,6 +404,8 @@ def main() -> int:
         publish_note(args)
     elif args.command == "publish-video":
         publish_video(args)
+    elif args.command == "publish-batch":
+        publish_batch(args)
     elif args.command == "run":
         run_pipeline(args)
     return 0

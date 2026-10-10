@@ -1,6 +1,6 @@
 ---
 name: douyin-groupbuy-auto-publish
-description: 抖音团购选品、卡券详情和图文/视频发布 CLI。查询昨日销售金额前十、按商品 ID 读取来客详情、生成推广简报并发布到抖音国内带货位置。
+description: 抖音团购选品、卡券详情和图文/视频发布 CLI。查询昨日销售金额前十、读取来客详情、生成推广简报，或用单个 Chrome 会话批量发布视频，校验账号、封面、AI 声明和作品回执，支持断点续跑。
 ---
 
 # 抖音团购选品图文/视频发布自动化
@@ -12,7 +12,7 @@ Use this skill for the full Douyin local-life coupon promotion path:
 1. Select ranked coupons from 抖音来客/生意经.
 2. Convert selected product facts into public-facing title, caption, and image prompts.
 3. Generate 3-5 poster images with the installed `imagegen` skill.
-4. Publish the prepared image note with music, or publish one prepared video, with a domestic group-buy POI.
+4. Publish the prepared image note with music, or publish prepared videos with a domestic group-buy POI. Use `publish-batch` for a video list with receipts and safe resume.
 
 Do not expose backend product IDs, sales counts, ranking numbers, cookies, QR codes, or private logs in public captions or generated posters.
 
@@ -119,6 +119,21 @@ Publish video with the verified domestic group-buy POI flow:
 
 Do not run `douyin check` before every publish. Use it only for explicit account diagnostics; `publish-video` validates or refreshes the account in its single upload browser session. A 2026-09-15 local publish test with `六安银泰百货` confirmed the command continued after QR login and completed publishing.
 
+## Batch Video CLI
+
+Read [references/batch-publish.md](references/batch-publish.md) and prepare a manifest containing the approved video files, portrait covers, short titles, captions, tags, and POIs. Use the exact approved files; do not add overlays, crop, replace audio, or regenerate media without the user's authorization. This publisher uploads assets and does not produce or alter videos. Authorized narration versions must be selected explicitly in the manifest.
+
+```bash
+./bin/douyin-groupbuy publish-batch \
+  --manifest /path/to/batch.json --state-dir /path/to/batch-state \
+  --account demo_douyin --expected-account demo_douyin_id \
+  --dry-run
+```
+
+Remove `--dry-run` only when publishing these works is authorized. `--account` is the local profile alias; `--expected-account` is the actual Douyin ID displayed on the creator homepage. The batch waits for that identity to load, checks it exactly before uploading, and keeps one persistent Chrome context for all jobs. Each job gets a fresh editing tab, its custom portrait cover, verified title and AI content declaration, and the domestic POI flow.
+
+Repeat the same command and state directory to continue: verified `submitted` jobs with the same assets and metadata are skipped. A job in `submission_uncertain` or `submitted_unverified` stops the batch for inspection; never delete its state or click publish again merely to retry. Changed media or metadata require a new job/state package and explicit publication authorization. The CLI records uncertainty before its single publish click and accepts only a new matching work-list receipt. Account identity, receipts, screenshots, and state files remain private local evidence.
+
 ## One-Step Selection And Brief
 
 Use `run` to select ten products, verify the chosen detail, and create a work package in one command. It does not generate native images by itself; use `imagegen` in Codex. To publish prepared assets in the same command, supply `--account`, `--images` (or `--image-dir`), and `--publish`. Add `--dry-run` to validate assets and print the upload command without submitting. Native image generation remains a separate agent step; do not report it as a shell-only generation workflow.
@@ -163,11 +178,12 @@ Brief generation succeeds only when the work directory contains:
 - `publish_meta.json`
 - `images/`
 
-Publishing succeeds only when the CLI exits successfully and Douyin reports a success state or enters the creator management page. If Douyin requests SMS verification or captcha, wait for the user/operator and do not report success early.
+For `publish-batch`, submission succeeds only when the saved `submitted` state contains a new work ID matching the intended title, caption prefix, account, and submission time; excluded old IDs cannot match. Report submission separately from moderation, public visibility, and playback/audio checks. Entering the management page alone is insufficient. The earlier single-item commands retain their runtime success checks; do not infer a verified batch receipt from their exit code. If Douyin requests SMS verification or captcha, wait for the user/operator and do not report success early.
 
 ## References
 
 - `references/selection-cli.md`: verified ranking/detail CLI and Automa migration
+- `references/batch-publish.md`: batch manifest, account check, single-click receipts and safe resume
 - `references/usage.md`: user-facing install and CLI examples
 - `references/automa-selectors.md`: proven music and location selectors
 - `references/public-copy-rules.md`: public promotion copy rules
