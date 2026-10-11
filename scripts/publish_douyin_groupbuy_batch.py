@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import contextlib
+import csv
 import hashlib
 import io
 import json
@@ -12,6 +14,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -107,6 +110,45 @@ def pending_jobs(jobs: list[dict], state_dir: Path) -> list[dict]:
     return pending
 
 
+def public_video_url(aweme_id) -> str:
+    identifier = str(aweme_id or "")
+    return "https://www.douyin.com/video/" + identifier if re.fullmatch(r"[0-9]+", identifier) else ""
+
+
+def export_results(jobs: list[dict], state_dir: Path, expected_account: str) -> dict:
+    rows = []
+    for job in jobs:
+        state = read(state_dir / job["id"] / "state.json")
+        receipt = state.get("receipt", {})
+        url = public_video_url(receipt.get("aweme_id"))
+        verified = (state.get("stage") == "submitted" and state.get("fingerprint") == job["fingerprint"]
+                    and receipt.get("matched") is True and receipt.get("account") == expected_account
+                    and receipt.get("title") == job["title"] and bool(url))
+        rows.append({"id": job["id"], "title": job["title"], "subtitle": job.get("subtitle", ""),
+                     "location": job["location"], "stage": state.get("stage", "not_started"),
+                     "receipt_verified": verified, "aweme_id": str(receipt["aweme_id"]) if verified else "",
+                     "public_url": url if verified else "", "create_time": receipt.get("create_time") if verified else None,
+                     "status_at_submission": receipt.get("status") if verified else None,
+                     "file": job["file"], "cover": job["cover"]})
+    report = {"exported_at": datetime.now(timezone.utc).isoformat(), "expected_account": expected_account,
+              "count": len(rows), "verified_receipts": sum(row["receipt_verified"] for row in rows),
+              "current_platform_status_checked": False, "items": rows}
+    save(state_dir / "publish-results.json", report)
+    fields = ["id", "title", "subtitle", "location", "stage", "receipt_verified", "aweme_id", "public_url", "create_time", "file", "cover"]
+    with (state_dir / "publish-results.csv").open("w", encoding="utf-8-sig", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    lines = ["# 短视频链接回收清单", "", "链接来自已核对账号、作品标题和同内容进度的提交回执。只代表已提交；未实时刷新审核、公开可见性或播放状态。", "", "| 标题 | 门店位置 | 提交阶段 | 短视频链接 |", "| --- | --- | --- | --- |"]
+    for row in rows:
+        title, location = (str(row[key]).replace("|", "\\|").replace("\n", " ").replace("\r", " ") for key in ("title", "location"))
+        link = "[查看视频](" + row["public_url"] + ")" if row["public_url"] else "未取得核验回执"
+        lines.append(f"| {title} | {location} | {row['stage']} | {link} |")
+    (state_dir / "publish-results.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {"results": str(state_dir / "publish-results.json"), "count": report["count"],
+            "verified_receipts": report["verified_receipts"]}
+
+
 async def verify_account(page, expected_account: str) -> None:
     await page.goto(CREATOR_HOME, wait_until="domcontentloaded", timeout=90000)
     await page.wait_for_function("() => /抖音号[：:]\\s*\\S+/.test(document.body.innerText)", timeout=60000)
@@ -150,9 +192,37 @@ async def set_cover(page, path: str) -> dict:
     upload = modal.locator("input.semi-upload-hidden-input").nth(1)
     await upload.set_input_files(path)
     names = await upload.evaluate("el => [...el.files].map(file => file.name)")
-    if names != [Path(path).name]:
+    if names and names != [Path(path).name]:
         raise RuntimeError("自定义封面文件选择读回不一致")
     await page.wait_for_timeout(3000)
+    source = "data:image/png;base64," + base64.b64encode(Path(path).read_bytes()).decode()
+    preview = await modal.evaluate("""async (el, source) => {
+        const expected = new Image();
+        expected.src = source;
+        await expected.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = expected.naturalWidth; canvas.height = expected.naturalHeight;
+        const ctx = canvas.getContext('2d', {willReadFrequently:true});
+        ctx.drawImage(expected, 0, 0);
+        const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        for (const image of el.querySelectorAll('img')) {
+            // The platform paints the cover on canvas and hides its source image.
+            if (!image.src.startsWith('data:image/') ||
+                image.naturalWidth !== canvas.width || image.naturalHeight !== canvas.height) continue;
+            ctx.drawImage(image, 0, 0);
+            const actual = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            let total = 0, count = 0;
+            for (let i = 0; i < pixels.length; i += 64) {
+                for (let channel = 0; channel < 3; channel++) {
+                    total += Math.abs(pixels[i+channel] - actual[i+channel]); count++;
+                }
+            }
+            if (total/count <= 10) return {width:canvas.width, height:canvas.height, mean_absolute_error:total/count};
+        }
+        return null;
+    }""", source)
+    if not preview:
+        raise RuntimeError("实际封面预览与指定本地封面不匹配")
     await modal.get_by_role("button", name="完成", exact=True).first.click(timeout=10000)
     later = page.get_by_role("button", name="暂不设置", exact=True)
     try:
@@ -160,7 +230,8 @@ async def set_cover(page, path: str) -> dict:
     except Exception:
         pass
     await modal.wait_for(state="detached", timeout=20000)
-    return {"verified": True, "selected_filename": names[0], "evidence": "文件输入读回及完成封面弹窗"}
+    return {"verified": True, "selected_filename": Path(path).name, "input_reset": not names,
+            "preview_match": preview, "evidence": "实际封面预览像素比对及完成封面弹窗"}
 
 
 async def verify_location(page, location: str) -> dict:
@@ -242,6 +313,7 @@ def match_receipt(items: list[dict], job: dict, expected_account: str, excluded:
         return None
     item = matches[0]
     return {"matched": True, "aweme_id": str(item["aweme_id"]), "title": item["item_title"],
+            "public_url": public_video_url(item["aweme_id"]),
             "caption": item["caption"], "create_time": item["create_time"], "account": expected_account,
             "status": item.get("status"), "poi_info": item.get("poi_info"),
             "ai_declaration": item.get("risk_infos", {}).get("content"), "evidence": "作品管理列表接口"}
@@ -301,6 +373,7 @@ async def publish(context, page, job: dict, expected_account: str, state_path: P
 
 
 async def live(args, jobs: list[dict]) -> None:
+    all_jobs = load_manifest(args.manifest, args.account, args.expected_account)
     runtime = Path(os.environ.get("SOCIAL_AUTO_UPLOAD_HOME", Path.home() / ".openclaw/workspace/social-auto-upload")).expanduser()
     sys.path.insert(0, str(runtime))
     from patchright.async_api import async_playwright
@@ -331,8 +404,10 @@ async def live(args, jobs: list[dict]) -> None:
                 except Exception as error:
                     save(state_path, {"stage": "prepare_failed", "fingerprint": job["fingerprint"], "error": str(error)})
                     raise
-                await publish(context, page, job, args.expected_account, state_path)
-                print(json.dumps({"completed": index, "total": len(jobs)}), flush=True)
+                result = await publish(context, page, job, args.expected_account, state_path)
+                export_results(all_jobs, args.state_dir, args.expected_account)
+                print(json.dumps({"completed": index, "total": len(jobs), "aweme_id": result["aweme_id"],
+                                  "public_url": result["public_url"]}), flush=True)
         finally:
             await context.close()
 
@@ -343,16 +418,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--account", required=True)
     parser.add_argument("--expected-account", required=True)
-    parser.add_argument("--dry-run", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--collect-results", action="store_true", help="Export saved verified links without opening Chrome or publishing")
     args = parser.parse_args(argv)
     args.state_dir = args.state_dir.expanduser().resolve()
     try:
         jobs = load_manifest(args.manifest, args.account, args.expected_account)
+        if args.collect_results:
+            print(json.dumps(export_results(jobs, args.state_dir, args.expected_account), ensure_ascii=False))
+            return 0
         pending = pending_jobs(jobs, args.state_dir)
         if args.dry_run:
             print(json.dumps({"dry_run": True, "validated": len(jobs), "pending": len(pending), "already_submitted": len(jobs) - len(pending)}))
-        elif pending:
-            asyncio.run(live(args, pending))
+        else:
+            try:
+                if pending:
+                    asyncio.run(live(args, pending))
+            finally:
+                print(json.dumps(export_results(jobs, args.state_dir, args.expected_account), ensure_ascii=False))
         return 0
     except Exception as error:
         print(f"批量发布已停止：{type(error).__name__}: {error}；请核查清单和本地逐条状态，禁止盲目重试。", file=sys.stderr)

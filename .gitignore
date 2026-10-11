@@ -11,3 +11,4 @@ outputs/
 work/
 *.mp4
 *.mov
+publish-results.*

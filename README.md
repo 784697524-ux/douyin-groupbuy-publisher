@@ -18,7 +18,7 @@
 | 选中的卡券和推广门店 | 生成标题、正文、图片提示词和发布元数据 | 一套公开推广工作包 |
 | 3-5 张生图海报 | 上传图片、选择音乐、挂国内 POI | 抖音团购图文 |
 | 一条已经生成的视频 | 填写标题简介、挂带货位置并发布 | 抖音团购视频 |
-| 一批确认过的视频和竖封面 | 单个 Chrome 会话逐条发布、核对账号和新作品回执、保存进度 | 可续跑的提交状态和回执 |
+| 一批确认过的视频和竖封面 | 单个 Chrome 会话逐条发布、核对账号和新作品回执、保存进度 | 可续跑回执、短视频链接及JSON/CSV/Markdown清单 |
 
 ## 脚本能做什么
 
@@ -84,11 +84,21 @@ groupbuy_work/
 
 同一条命令再次运行会跳过已有匹配回执的作品。发布按钮只点击一次；提交结果不明时保留状态并停止，避免重复发布。回执确认提交，与平台审核、公开可见和音频播放验收分别记录。清单格式、运行环境和恢复规则见 [批量发布 CLI](references/batch-publish.md)。
 
+每条核验回执都会自动回收作品链接，并在 `--state-dir` 写入 `publish-results.json`、`publish-results.csv`、`publish-results.md`。已有批次无需再次发布即可导出：
+
+```bash
+./bin/douyin-groupbuy collect-results \
+  --manifest /path/to/batch.json --state-dir /path/to/batch-state \
+  --account demo_douyin --expected-account demo_douyin_id
+```
+
+此命令只读已有回执并写入汇总，不开Chrome、不修改逐条发布状态，也不刷新审核或播放状态。单条视频要回收链接时，用一项清单调用 `publish-batch`；旧 `publish-video` 及图文入口不支持此导出。生成清单保留在本地任务目录，不提交GitHub。
+
 ## 命令和产物
 
 ![命令和产物关系](assets/usage-map.svg)
 
-常用入口有七个：
+常用入口有八个：
 
 | 命令 | 用途 |
 | --- | --- |
@@ -98,6 +108,7 @@ groupbuy_work/
 | `publish` | 发布团购图文并选择音乐 |
 | `publish-video` | 发布团购视频并挂国内位置 |
 | `publish-batch` | 单浏览器批量视频发布、回执确认与断点续跑 |
+| `collect-results` | 从已有核验回执回收短视频链接，导出JSON/CSV/Markdown清单 |
 | `run` | 选品、生成工作包，并可接续准备好的素材发布 |
 
 ## 团购位置不会只“输入”不“选择”

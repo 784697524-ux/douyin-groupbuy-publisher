@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import csv
 import importlib.util
 import io
 import json
@@ -86,6 +87,78 @@ class ManifestTests(unittest.TestCase):
             MODULE.save(path, {"stage": stage, "fingerprint": job["fingerprint"]})
             with self.assertRaises(RuntimeError):
                 MODULE.pending_jobs([job], state_dir)
+
+
+class ResultTests(unittest.TestCase):
+    setUp = ManifestTests.setUp
+    write_items = ManifestTests.write_items
+    jobs = ManifestTests.jobs
+
+    def submitted(self, job, **changes):
+        state = {"stage": "submitted", "fingerprint": job["fingerprint"],
+                 "receipt": {"matched": True, "aweme_id": "1234567890123456789", "account": "expected_demo",
+                             "title": job["title"], "create_time": 100, "status": {"in_reviewing": True}}}
+        state.update(changes)
+        MODULE.save(self.root / "states" / job["id"] / "state.json", state)
+
+    def test_collect_old_receipt_derives_link_and_exports_without_live_or_state_changes(self):
+        job = self.jobs()[0]
+        self.submitted(job)
+        state_path = self.root / "states/demo/state.json"
+        before = state_path.read_bytes()
+        with patch.object(MODULE, "live", side_effect=AssertionError("No browser or publishing")), contextlib.redirect_stdout(io.StringIO()):
+            result = MODULE.main(["--manifest", str(self.manifest), "--state-dir", str(self.root / "states"),
+                                  "--account", "test_profile", "--expected-account", "expected_demo", "--collect-results"])
+        self.assertEqual(result, 0)
+        self.assertEqual(state_path.read_bytes(), before)
+        report = MODULE.read(self.root / "states/publish-results.json")
+        self.assertEqual(report["verified_receipts"], 1)
+        self.assertFalse(report["current_platform_status_checked"])
+        self.assertEqual(report["items"][0]["public_url"], "https://www.douyin.com/video/1234567890123456789")
+        with (self.root / "states/publish-results.csv").open(encoding="utf-8-sig", newline="") as source:
+            self.assertEqual(list(csv.DictReader(source))[0]["title"], job["title"])
+        self.assertIn(report["items"][0]["public_url"], (self.root / "states/publish-results.md").read_text())
+
+    def test_partial_batch_preserves_success_and_never_links_uncertain_wrong_account_or_changed_content(self):
+        self.write_items([{**self.item, "id": name} for name in ("ok", "uncertain", "wrong", "changed", "missing")])
+        jobs = self.jobs()
+        self.submitted(jobs[0])
+        self.submitted(jobs[1], stage="submitted_unverified")
+        self.submitted(jobs[2], receipt={"matched": True, "aweme_id": "123", "account": "wrong_demo", "title": self.item["title"]})
+        self.submitted(jobs[3], fingerprint="another-content")
+        summary = MODULE.export_results(jobs, self.root / "states", "expected_demo")
+        self.assertEqual(summary["verified_receipts"], 1)
+        rows = MODULE.read(self.root / "states/publish-results.json")["items"]
+        self.assertTrue(rows[0]["public_url"])
+        self.assertTrue(all(not row["public_url"] for row in rows[1:]))
+
+    def test_resume_exports_all_links_without_republish(self):
+        self.submitted(self.jobs()[0])
+        with patch.object(MODULE, "live", side_effect=AssertionError("Already submitted")), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(MODULE.main(["--manifest", str(self.manifest), "--state-dir", str(self.root / "states"),
+                                         "--account", "test_profile", "--expected-account", "expected_demo"]), 0)
+        self.assertEqual(MODULE.read(self.root / "states/publish-results.json")["verified_receipts"], 1)
+
+    def test_live_failure_still_exports_earlier_success_without_retry(self):
+        self.write_items([{**self.item, "id": name} for name in ("ok", "failed")])
+
+        async def fail_after_first(args, jobs):
+            self.submitted(jobs[0])
+            self.submitted(jobs[1], stage="submitted_unverified")
+            raise RuntimeError("Synthetic interruption")
+
+        with patch.object(MODULE, "live", new=AsyncMock(side_effect=fail_after_first)) as live, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            result = MODULE.main(["--manifest", str(self.manifest), "--state-dir", str(self.root / "states"),
+                                  "--account", "test_profile", "--expected-account", "expected_demo"])
+        self.assertEqual(result, 1)
+        live.assert_awaited_once()
+        self.assertEqual(MODULE.read(self.root / "states/publish-results.json")["verified_receipts"], 1)
+        self.assertEqual(MODULE.read(self.root / "states/failed/state.json")["stage"], "submitted_unverified")
+
+    def test_invalid_identifiers_never_become_public_links(self):
+        for identifier in (None, "", "../other", "https://example.com", "123?redirect=bad"):
+            self.assertEqual(MODULE.public_video_url(identifier), "")
 
 
 class AccountTests(unittest.IsolatedAsyncioTestCase):

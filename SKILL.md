@@ -1,6 +1,6 @@
 ---
 name: douyin-groupbuy-auto-publish
-description: 抖音团购选品、卡券详情和图文/视频发布 CLI。查询昨日销售金额前十、读取来客详情、生成推广简报，或用单个 Chrome 会话批量发布视频，校验账号、封面、AI 声明和作品回执，支持断点续跑。
+description: 抖音团购选品、卡券详情和图文/视频发布 CLI。查询昨日销售排名、生成推广简报，或批量发布视频，校验账号、封面和新作品回执，自动回收短视频链接并导出清单，支持断点续跑。
 ---
 
 # 抖音团购选品图文/视频发布自动化
@@ -133,6 +133,16 @@ Read [references/batch-publish.md](references/batch-publish.md) and prepare a ma
 Remove `--dry-run` only when publishing these works is authorized. `--account` is the local profile alias; `--expected-account` is the actual Douyin ID displayed on the creator homepage. The batch waits for that identity to load, checks it exactly before uploading, and keeps one persistent Chrome context for all jobs. Each job gets a fresh editing tab, its custom portrait cover, verified title and AI content declaration, and the domestic POI flow.
 
 Repeat the same command and state directory to continue: verified `submitted` jobs with the same assets and metadata are skipped. A job in `submission_uncertain` or `submitted_unverified` stops the batch for inspection; never delete its state or click publish again merely to retry. Changed media or metadata require a new job/state package and explicit publication authorization. The CLI records uncertainty before its single publish click and accepts only a new matching work-list receipt. Account identity, receipts, screenshots, and state files remain private local evidence.
+
+After each verified submission, the CLI saves `receipt.public_url`, prints the short-video URL, and updates `publish-results.json`, `publish-results.csv`, and `publish-results.md` under `--state-dir`. Export an existing batch without opening Chrome or publishing:
+
+```bash
+./bin/douyin-groupbuy collect-results \
+  --manifest /path/to/batch.json --state-dir /path/to/batch-state \
+  --account demo_douyin --expected-account demo_douyin_id
+```
+
+Only matching `submitted` receipts with the expected account, title, fingerprint and numeric work ID receive a link. Older verified receipts without `public_url` are supported. These exports confirm submission, not current moderation, public visibility or playback; check those separately when requested. Generated results remain local and must not be synced to the skill repository. When link recovery is required for one video, use a one-item `publish-batch` manifest; legacy `publish-video` and image-note `publish` do not provide this receipt export.
 
 ## One-Step Selection And Brief
 

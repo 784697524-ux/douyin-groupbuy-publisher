@@ -48,7 +48,7 @@ export SOCIAL_AUTO_UPLOAD_HOME="${SOCIAL_AUTO_UPLOAD_HOME:-$HOME/.openclaw/works
 
 整个批次复用一个持久 Chrome Context。每条作品先创建新编辑页，再关闭上一页，避免关掉最后一页导致会话退出。上传完成后填写文案、选择国内团购 POI、应用竖封面，并设置 AI 内容声明。提交前再次读取标题和声明，不能通过就停止。
 
-竖封面应用成功指上传并完成封面弹窗操作；本地截图用于人工核对，自动化没有执行最终封面图像相似度检查。POI 是位置标签，不等同于绑定可购买的卡券商品链接。
+竖封面应用成功需完成封面弹窗操作并核对实际预览与本地封面的像素相似度；截图用于补充人工核对。POI 是位置标签，不等同于绑定可购买的卡券商品链接。
 
 点击发布前先保存当前作品 ID 集合和 `submission_uncertain` 状态，再点击一次发布按钮。回执从创作者作品列表读取，必须同时匹配：新作品 ID、标题、简介前缀、作者抖音号和提交时间，且不在旧作品排除列表中。管理页标题文字本身不能作为成功回执。
 
@@ -63,6 +63,28 @@ export SOCIAL_AUTO_UPLOAD_HOME="${SOCIAL_AUTO_UPLOAD_HOME:-$HOME/.openclaw/works
 状态、回执和截图保存在 `--state-dir`，属于私有运行证据。不要上传到共享代码仓库。遇到结果不明，不要删除状态、换空目录或自动重发来“试一下”。先核对平台是否已有作品；只有明确获准的新发布任务才创建新的发布状态包。
 
 `submitted` 证明提交回执匹配。平台审核、公开可见、最终封面、视频播放和配音需要分别验收。当前 CLI 不自动下载平台视频做音轨验收。
+
+## 自动回收短视频链接
+
+每条核验提交成功后，回执保存 `public_url`，终端输出 `aweme_id` 和可直接打开的 `https://www.douyin.com/video/<作品ID>`，并在状态目录更新三份汇总：
+
+- `publish-results.json`：标题、副标题、位置、提交阶段、作品ID、链接、提交时平台状态和本地素材路径。
+- `publish-results.csv`：UTF-8 BOM，便于Excel打开和后续表格回填。
+- `publish-results.md`：可点击短视频链接的清单。
+
+中途失败时保留此前成功作品的链接；未核验或不确定提交的项目不生成链接。同内容续跑会跳过已提交作品，并重新导出完整清单。`--dry-run` 不生成这些文件。
+
+已有批次只回收链接：
+
+```bash
+./bin/douyin-groupbuy collect-results \
+  --manifest /path/to/batch.json --state-dir /path/to/batch-state \
+  --account demo_douyin --expected-account demo_douyin_id
+```
+
+该命令需要原清单及素材以核对指纹；不打开浏览器、不重新发布、不修改逐条提交状态，也不实时刷新审核状态。旧回执只有作品ID时仍可生成链接；账号、标题、指纹或提交阶段不符时链接留空。JSON中 `current_platform_status_checked=false`，不能把链接存在当作审核通过或公开可见。单条视频也使用一项清单的 `publish-batch`；传统 `publish-video` 和图文入口不具备此导出能力。
+
+这些结果包含运行记录和本地路径，应保留在任务目录，不推送到GitHub。技能仓库只维护通用代码、说明和合成测试。
 
 ## 2026-10-10 迁移范围
 
